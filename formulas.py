@@ -1,3 +1,102 @@
+# =============================
+# Vizard FLOW 1:1 helpers & calibration constants
+# =============================
+
+# --- Calibration constants (screen-match, manual) ---
+FLOW_A0_MAIN = 343.2  # [m/s] a₀ = 1125 ft/s, used for main screen Mach↔velocity (manual)
+"""
+calibration from manual: FLOW main screen uses a₀ = 1125 ft/s = 343.2 m/s for Mach↔velocity, not dynamic a(T)
+"""
+FLOW_CFM_TO_HP = 0.43  # [HP/CFM@28] (screen-match, manual)
+"""
+calibration from manual: C_CFM→HP = 0.43, so HP = 0.43 * CFM@28 (single port, screen-match)
+"""
+FLOW_CSA_TO_HP = 0.257  # [HP/(cm²*m/s)] (screen-match, manual)
+"""
+calibration from manual: C_CSA = 0.257, so HP = C_CSA * A_mean * V_mean * N_ports_eff (screen-match)
+"""
+
+# --- Helper: L/D axis tick (ceil to next 0.01) ---
+def ld_axis_tick(value: float) -> float:
+    """
+    Ceil value to next 0.01 (for L/D axis ticks, as in FLOW GUI PDF).
+    Args:
+        value: float, L/D value
+    Returns:
+        float, rounded up to next 0.01
+    """
+    return math.ceil(value * 100.0) / 100.0
+
+# --- Helper: Correx format (4 decimal places, for report/export) ---
+def format_correx(val: float) -> str:
+    """
+    Format value to 4 decimal places (for Correx/SAE report compatibility).
+    Args:
+        val: float
+    Returns:
+        str, formatted to 4 decimal places
+    """
+    return f"{val:.4f}"
+
+# --- Main screen: Mach ↔ Mean Port Velocity (fixed a₀) ---
+def mean_port_velocity_from_mach_main(mach: float, units: str = "SI") -> float:
+    """
+    Returns mean port velocity [m/s or ft/s] for given Mach using FLOW main screen a₀ = 343.2 m/s (1125 ft/s).
+    Args:
+        mach: Mach number (dimensionless)
+        units: "SI" (m/s) or "US" (ft/s)
+    Returns:
+        float: mean port velocity [m/s or ft/s]
+    Source: calibration from manual, FLOW main screen (fixed a₀)
+    """
+    v = mach * FLOW_A0_MAIN
+    if units.upper() == "US":
+        return v * 3.28084  # m/s to ft/s
+    return v
+
+# --- Solver 2-z-3 for port geometry (main screen logic) ---
+def port_cc_from_csa_length(mean_csa: float, cl_length: float) -> float:
+    """
+    Returns port volume [cm³] from mean CSA [cm²] and centerline length [cm].
+    Formula: port_cc = mean_csa * cl_length
+    Args:
+        mean_csa: mean port area [cm²]
+        cl_length: port centerline length [cm]
+    Returns:
+        float: port volume [cm³]
+    Source: FLOW main screen, calibration from manual
+    """
+    return mean_csa * cl_length
+
+def mean_csa_from_port_cc_length(port_cc: float, cl_length: float) -> float:
+    """
+    Returns mean CSA [cm²] from port volume [cm³] and centerline length [cm].
+    Formula: mean_csa = port_cc / cl_length
+    Args:
+        port_cc: port volume [cm³]
+        cl_length: port centerline length [cm]
+    Returns:
+        float: mean port area [cm²]
+    Source: FLOW main screen, calibration from manual
+    """
+    if cl_length == 0:
+        raise ValueError("cl_length != 0")
+    return port_cc / cl_length
+
+def cl_length_from_port_cc_csa(port_cc: float, mean_csa: float) -> float:
+    """
+    Returns centerline length [cm] from port volume [cm³] and mean CSA [cm²].
+    Formula: cl_length = port_cc / mean_csa
+    Args:
+        port_cc: port volume [cm³]
+        mean_csa: mean port area [cm²]
+    Returns:
+        float: centerline length [cm]
+    Source: FLOW main screen, calibration from manual
+    """
+    if mean_csa == 0:
+        raise ValueError("mean_csa != 0")
+    return port_cc / mean_csa
 # --- Helper: clamp ---
 def clamp(x: float, lo: float, hi: float) -> float:
     """Clamp x to [lo, hi]."""
