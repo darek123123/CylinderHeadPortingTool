@@ -44,6 +44,15 @@ def cmd_flowtest_si(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_compare(args: argparse.Namespace) -> int:
+    dataA = _read_json(args.a)
+    dataB = _read_json(args.b)
+    out = A.compare_two_tests(dataA, dataB, mode=args.mode, units=args.units)
+    json.dump(out, sys.stdout, ensure_ascii=False)
+    sys.stdout.write("\n")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="CylinderHeadPortingTool.cli", description="DV/IOP backend CLI (no GUI)")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -55,6 +64,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_ft_si = sub.add_parser("flowtest-si", help="Compute SI Flow Test header metrics and table preview from JSON input")
     p_ft_si.add_argument("--input", required=True, help="Path to JSON input file")
     p_ft_si.set_defaults(func=cmd_flowtest_si)
+
+    p_cmp = sub.add_parser("compare", help="Compare two flow tests and return series and percent deltas")
+    p_cmp.add_argument("--a", required=True, help="Path to JSON input file for Test A")
+    p_cmp.add_argument("--b", required=True, help="Path to JSON input file for Test B")
+    p_cmp.add_argument("--units", choices=["US","SI"], default="SI")
+    p_cmp.add_argument("--mode", choices=["lift","ld"], default="lift")
+    p_cmp.set_defaults(func=cmd_compare)
 
     return p
 

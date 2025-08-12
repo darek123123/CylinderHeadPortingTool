@@ -1,3 +1,7 @@
+from typing import List, Dict, Literal
+from . import formulas as F
+from .calibration import A0_FT_S, A0_M_S, RHO_SLUG_FT3, RHO_KGM3_STD
+
 # --- SI Flow Test series and header/table packers ---
 def series_in_ex_ratio_per_point(test_rows):
     """Return [Q_ex / Q_in] for each row (per-point In/Ex flow ratio)."""
@@ -63,9 +67,6 @@ def flowtest_tables_SI(test_rows):
 Series generators for FLOW/IOP graphs (backend-only). Returns lists; no plotting.
 Uses formulas and centralized calibration constants.
 """
-from typing import List, Dict, Literal
-from . import formulas as F
-from .calibration import A0_FT_S, A0_M_S, RHO_SLUG_FT3, RHO_KGM3_STD
 
 # Minimal shape for a flow test point used by series generators
 # Each point is a dict with keys at minimum: lift_in (or lift_mm), q_cfm (or q_m3min),
