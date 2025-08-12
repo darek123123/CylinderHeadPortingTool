@@ -46,6 +46,19 @@ class FlowHeaderInputsSI(BaseModel):
     ex_r_bot_mm: NonNegative
     d_valve_in_mm: Positive
     d_valve_ex_mm: Positive
+    # Optional detailed geometry (align with IOP):
+    d_stem_in_mm: Optional[Positive] = None
+    d_stem_ex_mm: Optional[Positive] = None
+    d_throat_in_mm: Optional[Positive] = None
+    d_throat_ex_mm: Optional[Positive] = None
+    seat_angle_in_deg: Optional[float] = None
+    seat_angle_ex_deg: Optional[float] = None
+    seat_width_in_mm: Optional[NonNegative] = None
+    seat_width_ex_mm: Optional[NonNegative] = None
+    # Optional port descriptors (page 1 of IOP):
+    port_volume_cc: Optional[Positive] = None
+    port_length_centerline_mm: Optional[Positive] = None
+    port_area_mm2: Optional[Positive] = None
     cr: Positive
     max_lift_mm: Positive
     rows_in: List[dict]

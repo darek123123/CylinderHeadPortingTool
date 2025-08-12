@@ -29,9 +29,10 @@ class FlowTestTab(QtWidgets.QWidget):
         self.d_in = LabeledSpin("Valve In", "mm")
         self.d_ex = LabeledSpin("Valve Ex", "mm")
         self.calc = QtWidgets.QPushButton("Przelicz"); self.calc.clicked.connect(self.on_compute)
+        self.btn_sample = QtWidgets.QPushButton("Próbka"); self.btn_sample.clicked.connect(self.on_sample_menu)
         self.btn_import_si = QtWidgets.QPushButton("Import TXT (SI)"); self.btn_import_si.clicked.connect(self.on_import_si)
         self.btn_import_us = QtWidgets.QPushButton("Import TXT (US)"); self.btn_import_us.clicked.connect(self.on_import_us)
-        for w in [self.units, self.max_lift, self.cr, self.d_in, self.d_ex, self.calc, self.btn_import_si, self.btn_import_us]:
+        for w in [self.units, self.max_lift, self.cr, self.d_in, self.d_ex, self.calc, self.btn_sample, self.btn_import_si, self.btn_import_us]:
             top.addWidget(w)
 
         # Table and plot
@@ -57,11 +58,88 @@ class FlowTestTab(QtWidgets.QWidget):
         layout.addLayout(controls)
 
         # cache
-        self._last_series: Dict[str, List[float]] = {}
-        self._last_x: Dict[str, List[float]] = {}
-        self._last_rows: List[Dict[str, Any]] = []
-        self._last_units: str = "SI"
-        self._last_units_map: Dict[str, str] = {}
+        self._last_series = {}
+        self._last_x = {}
+        self._last_rows = []
+        self._last_units = "SI"
+        self._last_units_map = {}
+
+    def on_sample_menu(self) -> None:
+        menu = QtWidgets.QMenu(self)
+        act = menu.addAction('E7TE (SI, 28")')
+        act.triggered.connect(self._apply_e7te_si)
+        menu.exec(self.mapToGlobal(self.rect().bottomLeft()))
+
+    def _apply_e7te_si(self) -> None:
+        # Build header/rows for E7TE at 28" H2O (all SI). No math here; backend does everything.
+        header: Dict[str, Any] = {
+            # Units hint (API gets units separately)
+            "units": "SI",
+            "cr": 9.0,
+            "max_lift_mm": 17.78,
+            "test_pressure_inH2O": 28.0,
+            # Port window geometry (rect with two radii)
+            "in_width_mm": 30.861,
+            "in_height_mm": 55.118,
+            "in_r_top_mm": 10.16,
+            "in_r_bot_mm": 10.16,
+            "ex_width_mm": 34.798,
+            "ex_height_mm": 34.036,
+            "ex_r_top_mm": 10.16,
+            "ex_r_bot_mm": 10.16,
+            # Port window areas as reported (extra keys)
+            "port_area_in_mm2": 1612.255,
+            "port_area_ex_mm2": 1095.776,
+            # Valves
+            "d_valve_in_mm": 51.308,
+            "d_valve_ex_mm": 40.64,
+            # Alternate names to mirror DV reports (ignored by backend)
+            "valve_in_mm": 51.308,
+            "valve_ex_mm": 40.64,
+            # Stems
+            "d_stem_in_mm": 8.687,
+            "d_stem_ex_mm": 8.687,
+            # Throats (diameters); areas will be derived inside backend
+            "d_throat_in_mm": 39.37,
+            "d_throat_ex_mm": 32.512,
+            # Throat areas from DV (extra keys for traceability)
+            "throat_area_in_mm2": 1219.35,
+            "throat_area_ex_mm2": 830.19,
+            # Seats
+            "seat_angle_in_deg": 52.0,
+            "seat_angle_ex_deg": 42.0,
+            "seat_width_in_mm": 1.143,
+            "seat_width_ex_mm": 1.651,
+            # Optional descriptors
+            "port_length_centerline_mm": 136.398,  # generic centerline
+            "port_centerline_len_in_mm": 136.398,
+            "port_centerline_len_ex_mm": 73.152,
+            # metrics helpers (rows will be populated below)
+            "rows_in": [],
+            "rows_ex": [],
+            "ex_pipe_used": False,
+        }
+        rows: List[Dict[str, Any]] = [
+            {"lift_mm": 1.27,  "q_in_m3min": 1.0137, "q_ex_m3min": 0.6966, "dp_inH2O": 28.0},
+            {"lift_mm": 2.54,  "q_in_m3min": 2.0671, "q_ex_m3min": 1.4725, "dp_inH2O": 28.0},
+            {"lift_mm": 3.81,  "q_in_m3min": 3.1149, "q_ex_m3min": 2.1804, "dp_inH2O": 28.0},
+            {"lift_mm": 5.08,  "q_in_m3min": 4.1059, "q_ex_m3min": 3.0865, "dp_inH2O": 28.0},
+            {"lift_mm": 6.35,  "q_in_m3min": 4.7855, "q_ex_m3min": 3.8681, "dp_inH2O": 28.0},
+            {"lift_mm": 7.62,  "q_in_m3min": 5.4793, "q_ex_m3min": 4.1824, "dp_inH2O": 28.0},
+            {"lift_mm": 8.89,  "q_in_m3min": 5.9890, "q_ex_m3min": 4.5590, "dp_inH2O": 28.0},
+            {"lift_mm": 10.16, "q_in_m3min": 6.5129, "q_ex_m3min": 5.0687, "dp_inH2O": 28.0},
+            {"lift_mm": 12.70, "q_in_m3min": 7.2888, "q_ex_m3min": 5.3207, "dp_inH2O": 28.0},
+            {"lift_mm": 15.24, "q_in_m3min": 7.5889, "q_ex_m3min": 5.3406, "dp_inH2O": 28.0},
+            {"lift_mm": 17.78, "q_in_m3min": 7.8438, "q_ex_m3min": 5.6237, "dp_inH2O": 28.0},
+            {"lift_mm": 20.32, "q_in_m3min": 7.9854, "q_ex_m3min": 5.8616, "dp_inH2O": 28.0},
+            {"lift_mm": 22.86, "q_in_m3min": 8.0420, "q_ex_m3min": 6.0881, "dp_inH2O": 28.0},
+            {"lift_mm": 25.40, "q_in_m3min": 8.0703, "q_ex_m3min": 6.2863, "dp_inH2O": 28.0},
+        ]
+        # For header metrics (averages/totals/ratios), supply rows_in/ex with corrected flows
+        header["rows_in"] = [{"m3min_corr": r["q_in_m3min"], "dp_inH2O": r["dp_inH2O"]} for r in rows]
+        header["rows_ex"] = [{"m3min_corr": r["q_ex_m3min"], "dp_inH2O": r["dp_inH2O"]} for r in rows]
+        self.units.setCurrentText("SI")
+        self._render("SI", header, rows)
 
     def on_compute(self) -> None:
         units = self.units.currentText()

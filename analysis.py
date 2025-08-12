@@ -104,8 +104,11 @@ def flowtest_header_metrics_SI(inputs: dict) -> dict:
         avg_m3min_ex=avg_m3min_ex,
         total_m3min_in=total_m3min_in,
         total_m3min_ex=total_m3min_ex,
-    required_ratio=required_ratio,
-    existing_ratio=existing_ratio,
+        required_ratio=required_ratio,
+        existing_ratio=existing_ratio,
+        # Pass-through helpful fields for UI/tests
+        cr=float(inputs.get("cr", 0.0)),
+        max_lift_mm=float(inputs.get("max_lift_mm", 0.0)),
     )
 
 def flowtest_tables_SI(test_rows):

@@ -383,6 +383,12 @@ def area_throat(d_throat_m: float, d_stem_m: float) -> float:
         raise ValueError("d_throat_m > 0, 0 <= d_stem_m < d_throat_m")
     return math.pi * (d_throat_m ** 2 - d_stem_m ** 2) / 4.0
 
+def area_stem(d_stem_m: float) -> float:
+    """Stem cross-section area [m^2] = π/4 * d_stem^2."""
+    if d_stem_m < 0:
+        raise ValueError("d_stem_m >= 0")
+    return math.pi * (d_stem_m ** 2) / 4.0
+
 from typing import Literal
 def area_port_window_radiused(width_m: float, height_m: float, r_top_m: float, r_bot_m: float, *, model: Literal["rect_with_2r","racetrack"]="rect_with_2r") -> float:
     """
@@ -1210,6 +1216,33 @@ def effective_area_with_seat(lift: float, d_valve: float, d_throat: float, d_ste
         return area_eff_smoothmin(A_seat, A_thr, n=6)
     else:
         return area_eff_logistic(A_seat, A_thr, ld, ld0=0.30, k=12.0)
+
+def effective_area_min_model(
+    lift_m: float,
+    d_valve_m: float,
+    d_throat_m: float,
+    d_stem_m: float,
+    seat_angle_deg: float,
+    seat_width_m: float,
+    window_area_m2: float | None = None,
+) -> float:
+    """Deterministic min-rule effective area per spec:
+    A_seat = area_seat_limited(d_valve, lift, seat_angle, seat_width)
+    A_curtain = area_curtain(d_valve, lift)
+    A_throat_stem = max(π/4*(d_throat^2 − d_stem^2), 0)
+    A_window = window_area_m2 (if provided)
+    A_eff = min(A_seat, A_curtain, A_throat_stem, A_window or +∞)
+    Note: This is non-decreasing in lift (A_seat and A_curtain non-decreasing; A_throat/A_window constants).
+    """
+    if d_valve_m <= 0 or d_throat_m <= 0 or d_stem_m < 0 or seat_width_m < 0 or lift_m < 0:
+        raise ValueError("Invalid geometry for effective area")
+    a_seat = area_seat_limited(d_valve_m, lift_m, seat_angle_deg, seat_width_m)
+    a_curt = area_curtain(d_valve_m, lift_m)
+    a_thr = max(area_throat(d_throat_m, d_stem_m), 0.0)
+    terms = [a_seat, a_curt, a_thr]
+    if window_area_m2 is not None and window_area_m2 > 0:
+        terms.append(window_area_m2)
+    return min(terms)
 
 # -----------------------------------------------------------------------------
 # 13) Self-check przy uruchomieniu modułu

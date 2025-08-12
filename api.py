@@ -46,29 +46,65 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
         _ = FlowHeaderInputsSI(**header)
         _ = [FlowRowSI(**r) for r in rows]
         header_metrics = A.flowtest_header_metrics_SI({**header})
-        # Ensure rows for table computations carry d_valve_mm (use intake valve by convention)
-        rows_for_table = []
-        for r in rows:
-            if "d_valve_mm" in r and r["d_valve_mm"]:
-                rows_for_table.append(r)
-            else:
-                rows_for_table.append({**r, "d_valve_mm": float(header.get("d_valve_in_mm", 0.0))})
-        table_rows = A.flowtest_tables_SI(rows_for_table)
-        # Points per side
+    # Points per side
         x_lift = [float(r.get("lift_mm", 0.0)) for r in rows]
         d_in = float(header.get("d_valve_in_mm", 0.0))
         d_ex = float(header.get("d_valve_ex_mm", 0.0))
         pts_int: List[Dict[str, Any]] = []
         pts_ex: List[Dict[str, Any]] = []
+        # Pre-compute geometry-derived mean areas (intake/exhaust)
+        # Prefer explicit port_area_mm2 if provided; else compute from window; else throat
+        try:
+            a_mean_in_m2 = None
+            a_mean_ex_m2 = None
+            if header.get("port_area_mm2"):
+                a_mean_in_m2 = float(header["port_area_mm2"]) * 1e-6
+                a_mean_ex_m2 = a_mean_in_m2
+            # Window areas
+            win_in_m2 = F.area_port_window_radiused(
+                float(header.get("in_width_mm", 0.0)) / 1000.0,
+                float(header.get("in_height_mm", 0.0)) / 1000.0,
+                float(header.get("in_r_top_mm", 0.0)) / 1000.0,
+                float(header.get("in_r_bot_mm", 0.0)) / 1000.0,
+                model="rect_with_2r",
+            ) if header.get("in_width_mm") and header.get("in_height_mm") else None
+            win_ex_m2 = F.area_port_window_radiused(
+                float(header.get("ex_width_mm", 0.0)) / 1000.0,
+                float(header.get("ex_height_mm", 0.0)) / 1000.0,
+                float(header.get("ex_r_top_mm", 0.0)) / 1000.0,
+                float(header.get("ex_r_bot_mm", 0.0)) / 1000.0,
+                model="rect_with_2r",
+            ) if header.get("ex_width_mm") and header.get("ex_height_mm") else None
+            # Throat areas
+            thr_in_m2 = None
+            thr_ex_m2 = None
+            if header.get("d_throat_in_mm"):
+                thr_in_m2 = F.area_throat(float(header.get("d_throat_in_mm", 0.0))/1000.0, float(header.get("d_stem_in_mm", 0.0))/1000.0)
+            if header.get("d_throat_ex_mm"):
+                thr_ex_m2 = F.area_throat(float(header.get("d_throat_ex_mm", 0.0))/1000.0, float(header.get("d_stem_ex_mm", 0.0))/1000.0)
+            # Resolve means
+            if a_mean_in_m2 is None:
+                a_mean_in_m2 = win_in_m2 or thr_in_m2
+            if a_mean_ex_m2 is None:
+                a_mean_ex_m2 = win_ex_m2 or thr_ex_m2
+        except Exception:
+            a_mean_in_m2 = None
+            a_mean_ex_m2 = None
+            win_in_m2 = None
+            win_ex_m2 = None
+            thr_in_m2 = None
+            thr_ex_m2 = None
         for r in rows:
             lift = float(r.get("lift_mm", 0.0))
             dp = float(r.get("dp_inH2O", 28.0))
+            # Row-level mean area (use row if provided, else derived)
+            r_a_mean_mm2 = r.get("a_mean_mm2")
             pts_int.append({
                 "q_m3min": float(r.get("q_in_m3min", 0.0)),
                 "a_ref_mm2": math.pi * d_in * lift,
                 "dp_inH2O": dp,
-                "a_mean_mm2": r.get("a_mean_mm2"),
-                "a_eff_mm2": r.get("a_eff_mm2"),
+                "a_mean_mm2": r_a_mean_mm2 if r_a_mean_mm2 else (a_mean_in_m2 * 1e6 if a_mean_in_m2 else None),
+                "a_eff_mm2": None,  # always compute below from geometry
                 "lift_mm": lift,
                 "d_valve_mm": d_in,
                 "swirl": r.get("swirl"),
@@ -77,12 +113,49 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
                 "q_m3min": float(r.get("q_ex_m3min", 0.0)),
                 "a_ref_mm2": math.pi * d_ex * lift,
                 "dp_inH2O": dp,
-                "a_mean_mm2": r.get("a_mean_mm2"),
-                "a_eff_mm2": r.get("a_eff_mm2"),
+                "a_mean_mm2": r_a_mean_mm2 if r_a_mean_mm2 else (a_mean_ex_m2 * 1e6 if a_mean_ex_m2 else None),
+                "a_eff_mm2": None,
                 "lift_mm": lift,
                 "d_valve_mm": d_ex,
                 "swirl": r.get("swirl"),
             })
+        # Always compute A_eff from geometry (min-rule) and cap by window
+        try:
+            dv_in = float(header.get("d_valve_in_mm", 0.0)) / 1000.0
+            dt_in = float(header.get("d_throat_in_mm", 0.0)) / 1000.0
+            ds_in = float(header.get("d_stem_in_mm", 0.0)) / 1000.0
+            sa_in = float(header.get("seat_angle_in_deg", 0.0))
+            sw_in = float(header.get("seat_width_in_mm", 0.0)) / 1000.0
+            dv_ex_m = float(header.get("d_valve_ex_mm", 0.0)) / 1000.0
+            dt_ex = float(header.get("d_throat_ex_mm", 0.0)) / 1000.0
+            ds_ex = float(header.get("d_stem_ex_mm", 0.0)) / 1000.0
+            sa_ex = float(header.get("seat_angle_ex_deg", 0.0))
+            sw_ex = float(header.get("seat_width_ex_mm", 0.0)) / 1000.0
+            if dv_in > 0 and dt_in > 0 and sa_in > 0 and sw_in >= 0:
+                for p in pts_int:
+                    a = F.effective_area_min_model(p["lift_mm"]/1000.0, dv_in, dt_in, ds_in, sa_in, sw_in, win_in_m2 if 'win_in_m2' in locals() else None)
+                    p["a_eff_mm2"] = a * 1e6
+            if dv_ex_m > 0 and dt_ex > 0 and sa_ex > 0 and sw_ex >= 0:
+                for p in pts_ex:
+                    a = F.effective_area_min_model(p["lift_mm"]/1000.0, dv_ex_m, dt_ex, ds_ex, sa_ex, sw_ex, win_ex_m2 if 'win_ex_m2' in locals() else None)
+                    p["a_eff_mm2"] = a * 1e6
+        except Exception:
+            pass
+        # Build table rows after enriching areas; prefer intake-side areas for single-column display
+        rows_for_table: List[Dict[str, Any]] = []
+        for i, r in enumerate(rows):
+            base = {**r}
+            if not base.get("d_valve_mm"):
+                base["d_valve_mm"] = float(header.get("d_valve_in_mm", 0.0))
+            # Prefer derived intake mean/eff if missing in row
+            if not base.get("a_mean_mm2") and i < len(pts_int):
+                if pts_int[i].get("a_mean_mm2"):
+                    base["a_mean_mm2"] = pts_int[i]["a_mean_mm2"]
+            if not base.get("a_eff_mm2") and i < len(pts_int):
+                if pts_int[i].get("a_eff_mm2"):
+                    base["a_eff_mm2"] = pts_int[i]["a_eff_mm2"]
+            rows_for_table.append(base)
+        table_rows = A.flowtest_tables_SI(rows_for_table)
         # X axes
         x_ld_int = A.series_flow_vs_ld(pts_int, units="SI", axis_round=True)
         x_ld_ex = A.series_flow_vs_ld(pts_ex, units="SI", axis_round=True)
@@ -163,20 +236,43 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
         hdr_si["rows_in"] = [{"m3min_corr": p["q_in_m3min"], "dp_inH2O": p.get("dp_inH2O", 28.0)} for p in si_rows]
         hdr_si["rows_ex"] = [{"m3min_corr": p["q_ex_m3min"], "dp_inH2O": p.get("dp_inH2O", 28.0)} for p in si_rows]
         header_metrics = A.flowtest_header_metrics_SI(hdr_si)
-        # Ensure rows fed into table calculations carry d_valve_mm
-        rows_for_table = []
-        for r in si_rows:
-            if "d_valve_mm" in r and r["d_valve_mm"]:
-                rows_for_table.append(r)
-            else:
-                rows_for_table.append({**r, "d_valve_mm": float(header.get("d_valve_in_mm", 0.0))})
-        table_rows = A.flowtest_tables_SI(rows_for_table)
         # Build points per side (SI shape)
         x_lift = [float(r.get("lift_mm", 0.0)) for r in si_rows]
         d_in = float(header.get("d_valve_in_mm", 0.0))
         d_ex = float(header.get("d_valve_ex_mm", 0.0))
         pts_int: List[Dict[str, Any]] = []
         pts_ex: List[Dict[str, Any]] = []
+        # Pre-compute mean areas and window caps in SI
+        try:
+            a_mean_in_m2 = None
+            a_mean_ex_m2 = None
+            if header.get("port_area_mm2"):
+                a = float(header["port_area_mm2"]) * 1e-6
+                a_mean_in_m2 = a
+                a_mean_ex_m2 = a
+            win_in_m2 = F.area_port_window_radiused(
+                float(header.get("in_width_mm", 0.0))/1000.0,
+                float(header.get("in_height_mm", 0.0))/1000.0,
+                float(header.get("in_r_top_mm", 0.0))/1000.0,
+                float(header.get("in_r_bot_mm", 0.0))/1000.0,
+            ) if header.get("in_width_mm") and header.get("in_height_mm") else None
+            win_ex_m2 = F.area_port_window_radiused(
+                float(header.get("ex_width_mm", 0.0))/1000.0,
+                float(header.get("ex_height_mm", 0.0))/1000.0,
+                float(header.get("ex_r_top_mm", 0.0))/1000.0,
+                float(header.get("ex_r_bot_mm", 0.0))/1000.0,
+            ) if header.get("ex_width_mm") and header.get("ex_height_mm") else None
+            thr_in_m2 = F.area_throat(float(header.get("d_throat_in_mm", 0.0))/1000.0, float(header.get("d_stem_in_mm", 0.0))/1000.0) if header.get("d_throat_in_mm") else None
+            thr_ex_m2 = F.area_throat(float(header.get("d_throat_ex_mm", 0.0))/1000.0, float(header.get("d_stem_ex_mm", 0.0))/1000.0) if header.get("d_throat_ex_mm") else None
+            if a_mean_in_m2 is None:
+                a_mean_in_m2 = win_in_m2 or thr_in_m2
+            if a_mean_ex_m2 is None:
+                a_mean_ex_m2 = win_ex_m2 or thr_ex_m2
+        except Exception:
+            a_mean_in_m2 = None
+            a_mean_ex_m2 = None
+            win_in_m2 = None
+            win_ex_m2 = None
         for r in si_rows:
             lift = float(r.get("lift_mm", 0.0))
             dp = float(r.get("dp_inH2O", 28.0))
@@ -184,8 +280,8 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
                 "q_m3min": float(r.get("q_in_m3min", 0.0)),
                 "a_ref_mm2": math.pi * d_in * lift,
                 "dp_inH2O": dp,
-                "a_mean_mm2": r.get("a_mean_mm2"),
-                "a_eff_mm2": r.get("a_eff_mm2"),
+                "a_mean_mm2": r.get("a_mean_mm2") or (a_mean_in_m2 * 1e6 if a_mean_in_m2 else None),
+                "a_eff_mm2": None,
                 "lift_mm": lift,
                 "d_valve_mm": d_in,
                 "swirl": r.get("swirl"),
@@ -194,12 +290,46 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
                 "q_m3min": float(r.get("q_ex_m3min", 0.0)),
                 "a_ref_mm2": math.pi * d_ex * lift,
                 "dp_inH2O": dp,
-                "a_mean_mm2": r.get("a_mean_mm2"),
-                "a_eff_mm2": r.get("a_eff_mm2"),
+                "a_mean_mm2": r.get("a_mean_mm2") or (a_mean_ex_m2 * 1e6 if a_mean_ex_m2 else None),
+                "a_eff_mm2": None,
                 "lift_mm": lift,
                 "d_valve_mm": d_ex,
                 "swirl": r.get("swirl"),
             })
+        # Derive effective area using min-rule and cap by window
+        try:
+            dv_in = float(header.get("d_valve_in_mm", 0.0)) / 1000.0
+            dt_in = float(header.get("d_throat_in_mm", 0.0)) / 1000.0
+            ds_in = float(header.get("d_stem_in_mm", 0.0)) / 1000.0
+            sa_in = float(header.get("seat_angle_in_deg", 0.0))
+            sw_in = float(header.get("seat_width_in_mm", 0.0)) / 1000.0
+            dv_ex_m = float(header.get("d_valve_ex_mm", 0.0)) / 1000.0
+            dt_ex = float(header.get("d_throat_ex_mm", 0.0)) / 1000.0
+            ds_ex = float(header.get("d_stem_ex_mm", 0.0)) / 1000.0
+            sa_ex = float(header.get("seat_angle_ex_deg", 0.0))
+            sw_ex = float(header.get("seat_width_ex_mm", 0.0)) / 1000.0
+            for p in pts_int:
+                if dv_in > 0 and dt_in > 0 and sa_in > 0 and sw_in >= 0:
+                    a = F.effective_area_min_model(p["lift_mm"]/1000.0, dv_in, dt_in, ds_in, sa_in, sw_in, win_in_m2 if 'win_in_m2' in locals() else None)
+                    p["a_eff_mm2"] = a * 1e6
+            for p in pts_ex:
+                if dv_ex_m > 0 and dt_ex > 0 and sa_ex > 0 and sw_ex >= 0:
+                    a = F.effective_area_min_model(p["lift_mm"]/1000.0, dv_ex_m, dt_ex, ds_ex, sa_ex, sw_ex, win_ex_m2 if 'win_ex_m2' in locals() else None)
+                    p["a_eff_mm2"] = a * 1e6
+        except Exception:
+            pass
+        # Build table rows (intake-side areas as display)
+        rows_for_table: List[Dict[str, Any]] = []
+        for i, r in enumerate(si_rows):
+            base = {**r}
+            if not base.get("d_valve_mm"):
+                base["d_valve_mm"] = float(header.get("d_valve_in_mm", 0.0))
+            if not base.get("a_mean_mm2") and i < len(pts_int) and pts_int[i].get("a_mean_mm2"):
+                base["a_mean_mm2"] = pts_int[i]["a_mean_mm2"]
+            if not base.get("a_eff_mm2") and i < len(pts_int) and pts_int[i].get("a_eff_mm2"):
+                base["a_eff_mm2"] = pts_int[i]["a_eff_mm2"]
+            rows_for_table.append(base)
+        table_rows = A.flowtest_tables_SI(rows_for_table)
         x_ld_int = A.series_flow_vs_ld(pts_int, units="SI", axis_round=True)
         x_ld_ex = A.series_flow_vs_ld(pts_ex, units="SI", axis_round=True)
         # Series (SI units for consistency)
