@@ -15,6 +15,7 @@ class FlowTestTab(QtWidgets.QWidget):
     def __init__(self, state: UIState, parent=None):
         super().__init__(parent)
         self.state = state
+        self._signals_connected = False
         self._build_ui()
 
     def _build_ui(self):
@@ -37,14 +38,17 @@ class FlowTestTab(QtWidgets.QWidget):
         self.table = QtWidgets.QTableView()
         self.plot = Plot()
 
-        # Controls below plot: axis and series toggles, export
+        # Controls below plot: axis/metric selectors, series toggles, export
         controls = QtWidgets.QHBoxLayout()
         self.axis = QtWidgets.QComboBox(); self.axis.addItems(["lift", "ld"])  # x-axis
+        self.metric = QtWidgets.QComboBox(); self.metric.addItems([
+            "Flow", "SAE CD", "Eff SAE CD", "Mean Vel", "Eff Vel", "Energy", "Energy Density", "Observed per area"
+        ])
         self.chk_in = QtWidgets.QCheckBox("Intake")
         self.chk_ex = QtWidgets.QCheckBox("Exhaust")
         self.chk_in.setChecked(True); self.chk_ex.setChecked(True)
         self.btn_export_png = QtWidgets.QPushButton("Export PNG"); self.btn_export_png.clicked.connect(self.on_export_png)
-        for w in [QtWidgets.QLabel("Axis:"), self.axis, self.chk_in, self.chk_ex, self.btn_export_png]:
+        for w in [QtWidgets.QLabel("Axis:"), self.axis, QtWidgets.QLabel("Metric:"), self.metric, self.chk_in, self.chk_ex, self.btn_export_png]:
             controls.addWidget(w)
 
         # Assemble layout
@@ -122,23 +126,68 @@ class FlowTestTab(QtWidgets.QWidget):
         table_rows = [[r.get("lift_mm"), r.get("q_in_m3min"), r.get("q_ex_m3min")] for r in rows]
         model = SimpleTableModel(["Lift", "Q_in", "Q_ex"], table_rows)
         self.table.setModel(model)
-        # Plot according to axis and series toggle
+        # Plot according to axis/metric and series toggle
         self._update_plot_from_series()
-        # React to changes
-        self.axis.currentIndexChanged.connect(self._update_plot_from_series)
-        self.chk_in.toggled.connect(self._update_plot_from_series)
-        self.chk_ex.toggled.connect(self._update_plot_from_series)
+        # React to changes (connect once)
+        if not self._signals_connected:
+            self.axis.currentIndexChanged.connect(self._update_plot_from_series)
+            self.metric.currentIndexChanged.connect(self._update_plot_from_series)
+            self.chk_in.toggled.connect(self._update_plot_from_series)
+            self.chk_ex.toggled.connect(self._update_plot_from_series)
+            self._signals_connected = True
 
     def _update_plot_from_series(self):
         if not self._last_series:
             return
         self.plot.clear()
+        # X axis and units
         if self.axis.currentText() == "lift":
             x_int = x_ex = self._last_x.get("lift_mm", [])
+            self.plot.set_units("mm", self._y_unit_for_metric())
         else:
             x_int = self._last_x.get("ld_int", [])
             x_ex = self._last_x.get("ld_ex", [])
+            self.plot.set_units("L/D", self._y_unit_for_metric())
+        # Metric mapping to series keys
+        metric_name = self.metric.currentText()
+        key_map = {
+            "Flow": ("flow_int", "flow_ex"),
+            "SAE CD": ("sae_cd_int", "sae_cd_ex"),
+            "Eff SAE CD": ("eff_cd_int", "eff_cd_ex"),
+            "Mean Vel": ("v_mean_int", "v_mean_ex"),
+            "Eff Vel": ("v_eff_int", "v_eff_ex"),
+            "Energy": ("energy_int", "energy_ex"),
+            "Energy Density": ("energy_density_int", "energy_density_ex"),
+            "Observed per area": ("observed_per_area_int", "observed_per_area_ex"),
+        }
+        kin, kex = key_map.get(metric_name, ("flow_int", "flow_ex"))
+        # Series
         if self.chk_in.isChecked():
-            self.plot.add_series("Intake", x_int, self._last_series.get("flow_int", []), "intake")
+            self.plot.add_series("Intake", x_int, self._last_series.get(kin, []), "intake")
         if self.chk_ex.isChecked():
-            self.plot.add_series("Exhaust", x_ex, self._last_series.get("flow_ex", []), "exhaust")
+            self.plot.add_series("Exhaust", x_ex, self._last_series.get(kex, []), "exhaust")
+        # Threshold lines for velocities
+        if metric_name in ("Mean Vel", "Eff Vel"):
+            from ..theme import THRESHOLDS
+            if metric_name == "Mean Vel":
+                self.plot.add_threshold_line(THRESHOLDS["vel_mean_warn_ms"], "warn", "warn")
+                self.plot.add_threshold_line(THRESHOLDS["vel_mean_crit_ms"], "crit", "crit")
+            else:
+                self.plot.add_threshold_line(THRESHOLDS["vel_eff_warn_ms"], "warn", "warn")
+                self.plot.add_threshold_line(THRESHOLDS["vel_eff_crit_ms"], "crit", "crit")
+
+    def _y_unit_for_metric(self) -> str:
+        m = self.metric.currentText() if hasattr(self, "metric") else "Flow"
+        if m == "Flow":
+            return "m³/min" if self._last_units == "SI" else "CFM"
+        if m in ("SAE CD", "Eff SAE CD"):
+            return "-"
+        if m in ("Mean Vel", "Eff Vel"):
+            return "m/s" if self._last_units == "SI" else "ft/s"
+        if m == "Energy":
+            return "J/m" if self._last_units == "SI" else "ft·lbf"
+        if m == "Energy Density":
+            return "J/m³" if self._last_units == "SI" else "ft·lbf/in³"
+        if m == "Observed per area":
+            return "m³/min/mm²" if self._last_units == "SI" else "CFM/in²"
+        return ""

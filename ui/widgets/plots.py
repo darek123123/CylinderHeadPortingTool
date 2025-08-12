@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional
 from PySide6 import QtCore, QtGui, QtWidgets
 import pyqtgraph as pg
 from pyqtgraph.exporters import ImageExporter
@@ -26,6 +26,8 @@ class Plot(QtCore.QObject):
         proxy.setWidget(self._xy_label)
         self.widget.addItem(proxy)
         self._xy_label.setStyleSheet("color: #B0BEC5; background: transparent;")
+        self._x_unit = ""
+        self._y_unit = ""
         # Mouse move for crosshair
         self.widget.scene().sigMouseMoved.connect(self._on_mouse_moved)
 
@@ -57,6 +59,10 @@ class Plot(QtCore.QObject):
         self.widget.addItem(line)
         return line
 
+    def set_units(self, x_unit: str = "", y_unit: str = ""):
+        self._x_unit = x_unit
+        self._y_unit = y_unit
+
     def toggle_series(self, name: str):
         item = self._series.get(name)
         if not item:
@@ -74,7 +80,9 @@ class Plot(QtCore.QObject):
         x = mousePoint.x(); y = mousePoint.y()
         self._cross_v.setPos(x)
         self._cross_h.setPos(y)
-        self._xy_label.setText(f"x={x:.3f}, y={y:.3f}")
+        xu = f" {self._x_unit}" if self._x_unit else ""
+        yu = f" {self._y_unit}" if self._y_unit else ""
+        self._xy_label.setText(f"x={x:.3f}{xu}, y={y:.3f}{yu}")
 
     def _attach_legend_interaction(self):
         # Install mouse press/double press events on legend items
