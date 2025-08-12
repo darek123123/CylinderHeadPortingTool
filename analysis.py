@@ -244,7 +244,7 @@ def series_percent(points_A: List[Dict], points_B: List[Dict], metric: str, mode
     return vals
 
 
-def compare_two_tests(testA: List[Dict], testB: List[Dict], *, mode: Literal["lift","ld"] = "lift", units: Literal["US","SI"] = "US") -> Dict[str, List[float]]:
+def compare_two_tests(testA: List[Dict], testB: List[Dict], *, mode: Literal["lift","ld"] = "lift", units: Literal["US","SI"] = "SI") -> Dict[str, List[float]]:
     """Aggregate comparison for two flow tests returning A, B and %Δ series for key metrics."""
     # X-axis
     xA = [p["lift_in"] if units == "US" else p["lift_mm"] for p in testA]

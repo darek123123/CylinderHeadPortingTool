@@ -24,20 +24,19 @@ G_M_S2: float = 9.80665          # [m/s^2]
 # These are intentionally mutable; use formulas.set_calibration to adjust from tests or tools.
 
 # Airflow HP limit: HP = K_CFM_TO_HP * CFM@28
-# Anchor example: 740 HP @ 1720 CFM → K_CFM_TO_HP set via set_calibration in tests.
-K_CFM_TO_HP: float = 0.0  # [HP/CFM@28]; set in tests to match specific screens
+# Anchors: 708 HP @ 322 CFM; 740 HP @ 1720 CFM (DV reports)
+K_CFM_TO_HP: float = 0.411  # [HP/CFM@28] default; tests may override via set_calibration
 
 # Port Area HP limit uses ft^3/min chain:
 # HP = K_CSA_HP * (A_mean[in^2] / 144) * (Mach * a0[ft/s]) * 60 * (n_ports_eff)
-# Anchor example: 685 HP @ A=2.75 in^2, Mach=0.5475, N=4 → K_CSA_HP set via tests.
-K_CSA_HP: float = 0.0     # [HP/(ft^3/min)]
+# Anchor: 685 HP @ 2.75 in², Mach≈0.5475, n_ports_eff=4
+K_CSA_HP: float = 1.0     # [HP/(ft^3/min)] default; tests may override
 
 # Effective port distribution factor used only as a multiplier on n_ports_eff in RPM↔CSA.
 # Anchor: 2.75 in^2 ↔ 7037 RPM (CID=427.7, VE=1.0, Mach≈0.5475, N=4) → K_PORT_DIST≈0.3085..0.3086
 K_PORT_DIST: float = 0.3086
 
-# Compression-ratio correction placeholder (exposed for future use)
-K_CR: float = 1.0
+# (reserved: compression-ratio correction placeholder removed; see SI block below)
 
 # Existing EX/IN ratio GUI tweak: GUI reports slightly higher than raw ratio.
 # Anchor: 84.1/114.5 → 0.745 → factor ≈ 1.0143, capped at 1.0.
