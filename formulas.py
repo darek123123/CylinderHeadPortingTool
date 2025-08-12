@@ -225,24 +225,20 @@ def observed_per_sq_mm(q_m3min: float, d_valve_mm: float, lift_mm: float) -> flo
         raise ValueError("d_valve_mm > 0, lift_mm > 0")
     return q_m3min / (math.pi * d_valve_mm * lift_mm)
 
-def existing_ex_int_ratio(avg_cfm_ex: float, avg_cfm_in: float) -> float:
+def existing_ex_int_ratio(avg_ex: float, avg_in: float, mode: Literal["avg","total"] = "avg") -> float:
     """
-    Existing exhaust/intake ratio: avg_cfm_ex / avg_cfm_in.
-    Args:
-        avg_cfm_ex: average exhaust CFM (>=0)
-        avg_cfm_in: average intake CFM (>0)
-    Returns:
-        float: ratio (dimensionless)
+    Existing exhaust/intake ratio.
+    mode="avg": use averages (header). mode="total": use totals (sum of points).
+    Unit-agnostic: ratio of like-units cancels; K_EXINT_RATIO is a global GUI tweak.
     """
-    if avg_cfm_in <= 0:
-        raise ValueError("avg_cfm_in > 0")
-    # Screen-match calibration: GUI reports slightly higher ratio than raw division
-    return min(1.0, (avg_cfm_ex / avg_cfm_in) * K_EXINT_RATIO)
+    if avg_in <= 0:
+        raise ValueError("avg_in > 0")
+    return min(1.0, (avg_ex / avg_in) * K_EXINT_RATIO)
 
 def required_ex_int_ratio(cr: float, max_lift_in: float) -> float:
     """
-    Required exhaust/intake ratio (GUI, calibration from manual):
-        = a * cr + b * max_lift_in + c
+    Required exhaust/intake ratio (GUI, linear model calibrated to DV reports):
+        = a * cr + b * max_lift_in + c  (unit-agnostic; max_lift_in in inches)
     Calibrated to match 0.739 for CR=10.5, MaxLift=0.540 (see Raport.txt)
     Args:
         cr: compression ratio

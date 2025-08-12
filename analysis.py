@@ -126,6 +126,11 @@ def series_cfm_per_sq_mm(points: List[Dict]) -> List[float]:
     return [F.observed_per_sq_mm(p["q_m3min"], p["d_valve_mm"], p["lift_mm"]) for p in points]
 
 
+def series_cfm_per_sq_area(points: List[Dict], units: Literal["US","SI"]) -> List[float]:
+    """Observed per area on the curtain: US→CFM/in², SI→m³/min/mm²."""
+    return series_cfm_per_sq_in(points) if units == "US" else series_cfm_per_sq_mm(points)
+
+
 def series_sae_cd(points: List[Dict], units: Literal["US", "SI"] = "US") -> List[float]:
     cds = []
     for p in points:
@@ -228,12 +233,68 @@ def series_swirl(points: List[Dict]) -> List[float]:
 
 
 def series_percent(points_A: List[Dict], points_B: List[Dict], metric: str, mode: Literal["lift", "ld"] = "lift") -> List[float]:
-    vals = []
+    vals: List[float] = []
     for a, b in zip(points_A, points_B):
         va = a[metric]
         vb = b[metric]
-        vals.append(F.percent_change(va, vb))
+        if vb == 0:
+            vals.append(None)  # protected division
+        else:
+            vals.append(F.percent_change(va, vb))
     return vals
+
+
+def compare_two_tests(testA: List[Dict], testB: List[Dict], *, mode: Literal["lift","ld"] = "lift", units: Literal["US","SI"] = "US") -> Dict[str, List[float]]:
+    """Aggregate comparison for two flow tests returning A, B and %Δ series for key metrics."""
+    # X-axis
+    xA = [p["lift_in"] if units == "US" else p["lift_mm"] for p in testA]
+    xB = [p["lift_in"] if units == "US" else p["lift_mm"] for p in testB]
+    if mode == "ld":
+        xA = series_flow_vs_ld(testA, units, axis_round=True)
+        xB = series_flow_vs_ld(testB, units, axis_round=True)
+    # Flow
+    flowA = series_flow_vs_lift(testA, units)
+    flowB = series_flow_vs_lift(testB, units)
+    # Observed per area
+    areaA = series_cfm_per_sq_area(testA, units)
+    areaB = series_cfm_per_sq_area(testB, units)
+    # SAE CD
+    cdA = series_sae_cd(testA, units)
+    cdB = series_sae_cd(testB, units)
+    effcdA = series_effective_sae_cd(testA, units)
+    effcdB = series_effective_sae_cd(testB, units)
+    # Velocities
+    vA = series_port_velocity(testA, units)
+    vB = series_port_velocity(testB, units)
+    veA = series_effective_velocity(testA, units)
+    veB = series_effective_velocity(testB, units)
+    # Energy
+    eA = series_port_energy(testA, units)
+    eB = series_port_energy(testB, units)
+    edA = series_port_energy_density(testA, units)
+    edB = series_port_energy_density(testB, units)
+    # Swirl
+    sA = series_swirl(testA)
+    sB = series_swirl(testB)
+
+    def pct(a, b):
+        out = []
+        for aa, bb in zip(a, b):
+            out.append(None if bb == 0 else F.percent_change(aa, bb))
+        return out
+
+    return {
+        "xA": xA, "xB": xB,
+        "flowA": flowA, "flowB": flowB, "flowPct": pct(flowA, flowB),
+        "areaA": areaA, "areaB": areaB, "areaPct": pct(areaA, areaB),
+        "cdA": cdA, "cdB": cdB, "cdPct": pct(cdA, cdB),
+        "effcdA": effcdA, "effcdB": effcdB, "effcdPct": pct(effcdA, effcdB),
+        "velA": vA, "velB": vB, "velPct": pct(vA, vB),
+        "effvelA": veA, "effvelB": veB, "effvelPct": pct(veA, veB),
+        "energyA": eA, "energyB": eB, "energyPct": pct(eA, eB),
+        "energyDensityA": edA, "energyDensityB": edB, "energyDensityPct": pct(edA, edB),
+        "swirlA": sA, "swirlB": sB,
+    }
 
 
 # =============================

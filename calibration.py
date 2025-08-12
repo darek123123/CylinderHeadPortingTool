@@ -43,6 +43,9 @@ K_CR: float = 1.0
 # Anchor: 84.1/114.5 → 0.745 → factor ≈ 1.0143, capped at 1.0.
 K_EXINT_RATIO: float = 1.0143
 
+# Mode for existing EX/IN ratio aggregation (header): "avg" or "total".
+EXINT_RATIO_MODE: str = "avg"
+
 # --- SI main screen calibration ---
 # Shift RPM = peak_rpm * (1 + SHIFT_ALPHA)
 SHIFT_ALPHA: float = 0.07
