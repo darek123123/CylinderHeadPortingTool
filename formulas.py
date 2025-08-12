@@ -303,7 +303,10 @@ def peak_rpm_from_csa(mean_csa_in2: float, mach: float, cid_in3: float, ve_peak:
         mach: Mach number (dimensionless)
         cid_in3: engine displacement [in³]
         ve_peak: volumetric efficiency at peak (0..1+)
-        n_ports_eff: effective number of ports (see manual)
+        n_ports_eff: ENGINE-WIDE effective number of simultaneously active intake ports at peak.
+            If you have per-cylinder effective ports (e.g., 2 valves/cyl, siamesed halves to 1),
+            convert to engine-wide as: n_ports_eff = (per_cyl) * (n_cyl / 2).
+            Prefer using the provided "*_per_cyl" wrappers or engine_wide_n_ports_eff(...).
     Returns:
         float: Peak HP RPM
     Source: calibration from manual, FLOW GUI
@@ -324,7 +327,9 @@ def csa_from_peak_rpm(peak_rpm: float, mach: float, cid_in3: float, ve_peak: flo
         mach: Mach number (dimensionless)
         cid_in3: engine displacement [in³]
         ve_peak: volumetric efficiency at peak (0..1+)
-        n_ports_eff: effective number of ports (see manual)
+        n_ports_eff: ENGINE-WIDE effective number of simultaneously active intake ports at peak.
+            If you have per-cylinder effective ports, convert as: per_cyl * (n_cyl/2).
+            Prefer using csa_from_peak_rpm_per_cyl(...).
     Returns:
         float: mean port area [in²]
     Source: calibration from manual, FLOW GUI
@@ -479,7 +484,8 @@ def hp_limit_from_csa(mean_csa_in2: float, mach: float, n_ports_eff: float) -> f
     Args:
         mean_csa_in2: mean port area [in²]
         mach: Mach number (dimensionless)
-        n_ports_eff: effective number of ports
+        n_ports_eff: ENGINE-WIDE effective number of simultaneously active intake ports at peak.
+            For per-cylinder inputs, use hp_limit_from_csa_per_cyl(...).
     Returns:
         float: HP limit
     Source: calibration from manual, FLOW GUI
@@ -593,6 +599,23 @@ def n_ports_eff_from_valves(n_int_valves_per_cyl: int, siamesed_intake: bool) ->
     factor = 0.5 if siamesed_intake else 1.0
     return n_int_valves_per_cyl * factor
 
+def engine_wide_n_ports_eff(n_int_valves_per_cyl: float, n_cyl: int, siamesed_intake: bool) -> float:
+    """
+    Convert per-cylinder effective intake ports to ENGINE-WIDE effective ports for 4-stroke.
+    Engine-wide N = (effective ports per cylinder) × (n_cyl / 2).
+    Where per-cylinder effective ports = valves_per_cyl × (0.5 if siamesed else 1.0).
+    Args:
+        n_int_valves_per_cyl: intake valves per cylinder (can be fractional if using an "effective" value).
+        n_cyl: total number of cylinders (>0)
+        siamesed_intake: whether intake ports are siamesed (halves per-cylinder effectiveness)
+    Returns:
+        float: engine-wide effective number of simultaneously active intake ports at peak.
+    """
+    if n_cyl <= 0:
+        raise ValueError("n_cyl > 0")
+    per_cyl = n_ports_eff_from_valves(int(round(n_int_valves_per_cyl)), siamesed_intake) if float(n_int_valves_per_cyl).is_integer() else (n_int_valves_per_cyl * (0.5 if siamesed_intake else 1.0))
+    return per_cyl * (n_cyl / 2.0)
+
 def piston_area_mm2(bore_mm: float) -> float:
     """Piston area [mm^2] = pi/4 * bore_mm^2."""
     if bore_mm <= 0:
@@ -655,6 +678,35 @@ def kw_limit_from_csa_SI(mean_port_area_mm2: float, mach: float, n_ports_eff: fl
     v_ms = mach * A0_M_S
     q_ports = a_m2 * v_ms * 60.0 * (n_ports_eff)
     return K_CSA_kW * q_ports
+
+# --- Per-cylinder convenience wrappers (to avoid ×2 mistakes) ---
+def peak_rpm_from_csa_per_cyl(mean_csa_in2: float, mach: float, cid_in3: float, ve_peak: float,
+                              n_ports_eff_per_cyl: float, n_cyl: int) -> float:
+    """Same as peak_rpm_from_csa but takes per-cylinder effective ports and number of cylinders."""
+    N = n_ports_eff_per_cyl * (n_cyl / 2.0)
+    return peak_rpm_from_csa(mean_csa_in2, mach, cid_in3, ve_peak, N)
+
+def csa_from_peak_rpm_per_cyl(peak_rpm: float, mach: float, cid_in3: float, ve_peak: float,
+                               n_ports_eff_per_cyl: float, n_cyl: int) -> float:
+    """Same as csa_from_peak_rpm but takes per-cylinder effective ports and number of cylinders."""
+    N = n_ports_eff_per_cyl * (n_cyl / 2.0)
+    return csa_from_peak_rpm(peak_rpm, mach, cid_in3, ve_peak, N)
+
+def hp_limit_from_csa_per_cyl(mean_csa_in2: float, mach: float, n_ports_eff_per_cyl: float, n_cyl: int) -> float:
+    """Same as hp_limit_from_csa but takes per-cylinder effective ports and number of cylinders."""
+    N = n_ports_eff_per_cyl * (n_cyl / 2.0)
+    return hp_limit_from_csa(mean_csa_in2, mach, N)
+
+def peak_rpm_from_csa_SI_per_cyl(mean_port_area_mm2: float, mach: float, disp_L: float, ve: float,
+                                 n_ports_eff_per_cyl: float, n_cyl: int) -> float:
+    """Same as peak_rpm_from_csa_SI but takes per-cylinder effective ports and number of cylinders."""
+    N = n_ports_eff_per_cyl * (n_cyl / 2.0)
+    return peak_rpm_from_csa_SI(mean_port_area_mm2, mach, disp_L, ve, N)
+
+def kw_limit_from_csa_SI_per_cyl(mean_port_area_mm2: float, mach: float, n_ports_eff_per_cyl: float, n_cyl: int) -> float:
+    """Same as kw_limit_from_csa_SI but takes per-cylinder effective ports and number of cylinders."""
+    N = n_ports_eff_per_cyl * (n_cyl / 2.0)
+    return kw_limit_from_csa_SI(mean_port_area_mm2, mach, N)
 
 def kw_limit_from_airflow_SI(q_m3min_28: float) -> float:
     """kW limit from airflow (SI): kW = K_FLOW_kW * q_m3min_28."""

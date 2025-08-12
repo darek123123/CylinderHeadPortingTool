@@ -375,16 +375,18 @@ def compute_main_screen_SI(inputs: Dict) -> Dict:
     stroke_mm = float(inputs["stroke_mm"])  # mm
     n_cyl = int(inputs["n_cyl"])  # count
     ve = float(inputs.get("ve", 1.0))
-    # Derive n_ports_eff optionally from valves/siamesing
+    # Effective ports: if provided, treat as ENGINE-WIDE; otherwise derive from per-cylinder valves/siamesing
     if "n_ports_eff" in inputs:
-        n_ports_eff = float(inputs["n_ports_eff"])
+        n_ports_eff = float(inputs["n_ports_eff"])  # engine-wide effective ports (tests expect this)
     else:
+        # Derive engine-wide effective ports N from valves-per-cylinder with siamesed factor
         niv = int(inputs.get("n_int_valves_per_cyl", 0))
         siam = bool(inputs.get("siamesed_intake", False))
         if niv > 0:
-            n_ports_eff = F.n_ports_eff_from_valves(niv, siam)
+            per_cyl = F.n_ports_eff_from_valves(niv, siam)  # per cylinder
+            n_ports_eff = per_cyl * (n_cyl / 2.0)  # 4T: ~half cylinders drawing per rev
         else:
-            n_ports_eff = n_cyl/2.0
+            n_ports_eff = n_cyl / 2.0
     cr = float(inputs.get("cr", 10.5))
 
     v_port_ms = F.port_velocity_from_mach(mach, units="SI")
@@ -436,14 +438,15 @@ def compute_main_screen_US(inputs: Dict) -> Dict:
     n_cyl = int(inputs["n_cyl"])  # count
     ve = float(inputs.get("ve", 1.0))
     if "n_ports_eff" in inputs:
-        n_ports_eff = float(inputs["n_ports_eff"])
+        n_ports_eff = float(inputs["n_ports_eff"])  # engine-wide
     else:
         niv = int(inputs.get("n_int_valves_per_cyl", 0))
         siam = bool(inputs.get("siamesed_intake", False))
         if niv > 0:
-            n_ports_eff = F.n_ports_eff_from_valves(niv, siam)
+            per_cyl = F.n_ports_eff_from_valves(niv, siam)
+            n_ports_eff = per_cyl * (n_cyl / 2.0)
         else:
-            n_ports_eff = n_cyl/2.0
+            n_ports_eff = n_cyl / 2.0
     cr = float(inputs.get("cr", 10.5))
 
     Amean_mm2 = F.in2_to_mm2(Amean_in2)
