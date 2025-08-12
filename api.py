@@ -46,7 +46,14 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
         _ = FlowHeaderInputsSI(**header)
         _ = [FlowRowSI(**r) for r in rows]
         header_metrics = A.flowtest_header_metrics_SI({**header})
-        table_rows = A.flowtest_tables_SI(rows)
+        # Ensure rows for table computations carry d_valve_mm (use intake valve by convention)
+        rows_for_table = []
+        for r in rows:
+            if "d_valve_mm" in r and r["d_valve_mm"]:
+                rows_for_table.append(r)
+            else:
+                rows_for_table.append({**r, "d_valve_mm": float(header.get("d_valve_in_mm", 0.0))})
+        table_rows = A.flowtest_tables_SI(rows_for_table)
         # Points per side
         x_lift = [float(r.get("lift_mm", 0.0)) for r in rows]
         d_in = float(header.get("d_valve_in_mm", 0.0))
@@ -64,6 +71,7 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
                 "a_eff_mm2": r.get("a_eff_mm2"),
                 "lift_mm": lift,
                 "d_valve_mm": d_in,
+                "swirl": r.get("swirl"),
             })
             pts_ex.append({
                 "q_m3min": float(r.get("q_ex_m3min", 0.0)),
@@ -73,6 +81,7 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
                 "a_eff_mm2": r.get("a_eff_mm2"),
                 "lift_mm": lift,
                 "d_valve_mm": d_ex,
+                "swirl": r.get("swirl"),
             })
         # X axes
         x_ld_int = A.series_flow_vs_ld(pts_int, units="SI", axis_round=True)
@@ -99,6 +108,8 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
         energy_density_ex = safe(lambda: A.series_port_energy_density(pts_ex, "SI"), len(pts_ex))
         observed_int = safe(lambda: A.series_cfm_per_sq_area(pts_int, "SI"), len(pts_int))
         observed_ex = safe(lambda: A.series_cfm_per_sq_area(pts_ex, "SI"), len(pts_ex))
+        swirl_int = A.series_swirl(pts_int)
+        swirl_ex = A.series_swirl(pts_ex)
         units_map = {
             "flow": "m³/min",
             "vel": "m/s",
@@ -106,6 +117,7 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
             "energy_density": "J/m³",
             "observed_per_area": "m³/min/mm²",
             "cd": "-",
+            "swirl": "-",
         }
         return {
             "x": {"lift_mm": x_lift, "ld_int": x_ld_int, "ld_ex": x_ld_ex},
@@ -118,6 +130,7 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
                 "energy_int": energy_int, "energy_ex": energy_ex,
                 "energy_density_int": energy_density_int, "energy_density_ex": energy_density_ex,
                 "observed_per_area_int": observed_int, "observed_per_area_ex": observed_ex,
+                "swirl_int": swirl_int, "swirl_ex": swirl_ex,
             },
             "units": units_map,
             "header": header_metrics,
@@ -150,7 +163,14 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
         hdr_si["rows_in"] = [{"m3min_corr": p["q_in_m3min"], "dp_inH2O": p.get("dp_inH2O", 28.0)} for p in si_rows]
         hdr_si["rows_ex"] = [{"m3min_corr": p["q_ex_m3min"], "dp_inH2O": p.get("dp_inH2O", 28.0)} for p in si_rows]
         header_metrics = A.flowtest_header_metrics_SI(hdr_si)
-        table_rows = A.flowtest_tables_SI(si_rows)
+        # Ensure rows fed into table calculations carry d_valve_mm
+        rows_for_table = []
+        for r in si_rows:
+            if "d_valve_mm" in r and r["d_valve_mm"]:
+                rows_for_table.append(r)
+            else:
+                rows_for_table.append({**r, "d_valve_mm": float(header.get("d_valve_in_mm", 0.0))})
+        table_rows = A.flowtest_tables_SI(rows_for_table)
         # Build points per side (SI shape)
         x_lift = [float(r.get("lift_mm", 0.0)) for r in si_rows]
         d_in = float(header.get("d_valve_in_mm", 0.0))
@@ -168,6 +188,7 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
                 "a_eff_mm2": r.get("a_eff_mm2"),
                 "lift_mm": lift,
                 "d_valve_mm": d_in,
+                "swirl": r.get("swirl"),
             })
             pts_ex.append({
                 "q_m3min": float(r.get("q_ex_m3min", 0.0)),
@@ -177,6 +198,7 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
                 "a_eff_mm2": r.get("a_eff_mm2"),
                 "lift_mm": lift,
                 "d_valve_mm": d_ex,
+                "swirl": r.get("swirl"),
             })
         x_ld_int = A.series_flow_vs_ld(pts_int, units="SI", axis_round=True)
         x_ld_ex = A.series_flow_vs_ld(pts_ex, units="SI", axis_round=True)
@@ -202,6 +224,8 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
         energy_density_ex = safe(lambda: A.series_port_energy_density(pts_ex, "SI"), len(pts_ex))
         observed_int = safe(lambda: A.series_cfm_per_sq_area(pts_int, "SI"), len(pts_int))
         observed_ex = safe(lambda: A.series_cfm_per_sq_area(pts_ex, "SI"), len(pts_ex))
+        swirl_int = A.series_swirl(pts_int)
+        swirl_ex = A.series_swirl(pts_ex)
         units_map = {
             "flow": "m³/min",
             "vel": "m/s",
@@ -209,6 +233,7 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
             "energy_density": "J/m³",
             "observed_per_area": "m³/min/mm²",
             "cd": "-",
+            "swirl": "-",
         }
         return {
             "x": {"lift_mm": x_lift, "ld_int": x_ld_int, "ld_ex": x_ld_ex},
@@ -221,6 +246,7 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
                 "energy_int": energy_int, "energy_ex": energy_ex,
                 "energy_density_int": energy_density_int, "energy_density_ex": energy_density_ex,
                 "observed_per_area_int": observed_int, "observed_per_area_ex": observed_ex,
+                "swirl_int": swirl_int, "swirl_ex": swirl_ex,
             },
             "units": units_map,
             "header": header_metrics,
@@ -340,6 +366,8 @@ def compare_tests(
         # Observed per area
         observed_int = safe(lambda: A.series_cfm_per_sq_area(pts_int, units), len(pts_int))
         observed_ex = safe(lambda: A.series_cfm_per_sq_area(pts_ex, units), len(pts_ex))
+        swirl_int = A.series_swirl(pts_int)
+        swirl_ex = A.series_swirl(pts_ex)
         return {
             "flow_int": flow_int, "flow_ex": flow_ex,
             "sae_cd_int": sae_cd_int, "sae_cd_ex": sae_cd_ex,
@@ -349,6 +377,7 @@ def compare_tests(
             "energy_int": energy_int, "energy_ex": energy_ex,
             "energy_density_int": energy_density_int, "energy_density_ex": energy_density_ex,
             "observed_per_area_int": observed_int, "observed_per_area_ex": observed_ex,
+            "swirl_int": swirl_int, "swirl_ex": swirl_ex,
         }
 
     A_ser = _series_pack(A_int, A_ex)
@@ -365,9 +394,20 @@ def compare_tests(
 
     delta = {k: _pct(A_ser[k], B_ser[k]) for k in A_ser.keys()}
 
+    units_map = {
+        "flow": "m³/min" if units == "SI" else "CFM",
+        "cd": "-",
+        "vel": "m/s" if units == "SI" else "ft/s",
+        "energy": "J/m" if units == "SI" else "ft-lbf",
+        "energy_density": "J/m³" if units == "SI" else "ft-lbf/ft³ ×144",
+        "observed_per_area": "m³/min/mm²" if units == "SI" else "CFM/in²",
+        "swirl": "-",
+    }
+
     return {
         "x": {"lift_mm": x_lift if units == "SI" else [F.in_to_mm(v) for v in x_lift], "ld_int": x_int, "ld_ex": x_ex},
         "A": A_ser,
         "B": B_ser,
         "delta_pct": delta,
+        "units": units_map,
     }
