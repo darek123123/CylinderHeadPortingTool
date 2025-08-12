@@ -8,6 +8,7 @@ from ..widgets.plots import Plot
 from ..widgets.tables import SimpleTableModel
 from ..state import UIState
 from ... import api
+from ... import io
 
 
 class FlowTestTab(QtWidgets.QWidget):
@@ -27,15 +28,36 @@ class FlowTestTab(QtWidgets.QWidget):
         self.d_ex = LabeledSpin("Valve Ex", "mm")
         self.calc = QtWidgets.QPushButton("Przelicz")
         self.calc.clicked.connect(self.on_compute)
-        for w in [self.units, self.max_lift, self.cr, self.d_in, self.d_ex, self.calc]:
+        self.btn_import_si = QtWidgets.QPushButton("Import TXT (SI)")
+        self.btn_import_us = QtWidgets.QPushButton("Import TXT (US)")
+        self.btn_import_si.clicked.connect(self.on_import_si)
+        self.btn_import_us.clicked.connect(self.on_import_us)
+        for w in [self.units, self.max_lift, self.cr, self.d_in, self.d_ex, self.calc, self.btn_import_si, self.btn_import_us]:
             top.addWidget(w)
 
         self.table = QtWidgets.QTableView()
         self.plot = Plot()
 
+        # Controls below plot: axis and series toggles, export
+        controls = QtWidgets.QHBoxLayout()
+        self.axis = QtWidgets.QComboBox(); self.axis.addItems(["lift", "ld"])  # x-axis
+        self.chk_in = QtWidgets.QCheckBox("Intake")
+        self.chk_ex = QtWidgets.QCheckBox("Exhaust")
+        self.chk_in.setChecked(True); self.chk_ex.setChecked(True)
+        self.btn_export_png = QtWidgets.QPushButton("Export PNG")
+        self.btn_export_png.clicked.connect(self.on_export_png)
+        for w in [QtWidgets.QLabel("Axis:"), self.axis, self.chk_in, self.chk_ex, self.btn_export_png]:
+            controls.addWidget(w)
+
         layout.addLayout(top)
         layout.addWidget(self.table)
         layout.addWidget(self.plot.widget)
+        layout.addLayout(controls)
+
+        # cache of last compute
+        self._last_series: Dict[str, List[float]] = {}
+        self._last_rows: List[Dict[str, Any]] = []
+        self._last_units: str = "SI"
 
     def on_compute(self):
         units = self.units.currentText()
@@ -53,16 +75,65 @@ class FlowTestTab(QtWidgets.QWidget):
             {"lift_mm": 6.0, "q_in_m3min": 0.5, "q_ex_m3min": 0.45, "dp_inH2O": 28.0},
             {"lift_mm": 10.0, "q_in_m3min": 0.8, "q_ex_m3min": 0.7, "dp_inH2O": 28.0}
         ]
+        self._render(units, header, rows)
+
+    def on_import_si(self):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open SI report", "", "Text Files (*.txt)")
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                text = f.read()
+            parsed = io.parse_iop_report_si(text)
+            header = parsed["flow_header"]
+            rows = parsed["flow_rows"]
+            self.units.setCurrentText("SI")
+            self._render("SI", header, rows)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Import error", str(e))
+
+    def on_import_us(self):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open US report", "", "Text Files (*.txt)")
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                text = f.read()
+            parsed = io.parse_iop_report_us(text)
+            header = parsed["flow_header"]
+            rows = parsed["flow_rows"]
+            self.units.setCurrentText("US")
+            self._render("US", header, rows)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Import error", str(e))
+
+    def on_export_png(self):
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export plot", "flow.png", "PNG Files (*.png)")
+        if path:
+            self.plot.export_png(path)
+
+    def _render(self, units: str, header: Dict[str, Any], rows: List[Dict[str, Any]]):
         data = api.flowtest_compute(units, header, rows)
-        hdr = data["header"]
-        table_rows = [
-            [r["lift_mm"], r["q_in_m3min"], r["q_ex_m3min"]] for r in rows
-        ]
+        self._last_series = data.get("series", {})
+        self._last_rows = rows
+        self._last_units = units
+        # Table basic view
+        table_rows = [[r.get("lift_mm"), r.get("q_in_m3min"), r.get("q_ex_m3min")] for r in rows]
         model = SimpleTableModel(["Lift", "Q_in", "Q_ex"], table_rows)
         self.table.setModel(model)
-        xs = [r["lift_mm"] for r in rows]
-        ys_in = [r["q_in_m3min"] for r in rows]
-        ys_ex = [r["q_ex_m3min"] for r in rows]
+        # Plot according to axis and series toggle
+        self._update_plot_from_series()
+        # React to changes
+        self.axis.currentIndexChanged.connect(self._update_plot_from_series)
+        self.chk_in.toggled.connect(self._update_plot_from_series)
+        self.chk_ex.toggled.connect(self._update_plot_from_series)
+
+    def _update_plot_from_series(self):
+        if not self._last_series:
+            return
+        x = self._last_series["x_lift"] if self.axis.currentText() == "lift" else self._last_series["x_ld"]
         self.plot.clear()
-        self.plot.add_series("In", xs, ys_in, "intake")
-        self.plot.add_series("Ex", xs, ys_ex, "exhaust")
+        if self.chk_in.isChecked():
+            self.plot.add_series("Intake", x, self._last_series.get("flow_in", []), "intake")
+        if self.chk_ex.isChecked():
+            self.plot.add_series("Exhaust", x, self._last_series.get("flow_ex", []), "exhaust")

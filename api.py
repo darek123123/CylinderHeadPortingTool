@@ -49,7 +49,81 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
         _ = [FlowRowSI(**r) for r in rows]
         header_metrics = A.flowtest_header_metrics_SI({**header})
         table_rows = A.flowtest_tables_SI(rows)
-        return {"units": units, "header": header_metrics, "rows": table_rows}
+        # Build series for UI (Flow and additional metrics intake/exhaust, x axes)
+        x_lift = [r.get("lift_mm", 0.0) for r in rows]
+        x_ld = A.series_flow_vs_ld(rows, units="SI", axis_round=True)
+        # Intake/exhaust flows
+        flow_in = [r.get("q_in_m3min", 0.0) for r in rows]
+        flow_ex = [r.get("q_ex_m3min", 0.0) for r in rows]
+        # SAE CD requires a_ref and dp; compute curtain as reference for each side
+        import math
+        d_in = float(header.get("d_valve_in_mm", 0.0))
+        d_ex = float(header.get("d_valve_ex_mm", 0.0))
+        pts_in = []
+        pts_ex = []
+        for r in rows:
+            lift = float(r.get("lift_mm", 0.0))
+            dp = float(r.get("dp_inH2O", 28.0))
+            a_ref_in_mm2 = math.pi * d_in * lift  # curtain approx in mm^2
+            a_ref_ex_mm2 = math.pi * d_ex * lift
+            pts_in.append({
+                "q_m3min": float(r.get("q_in_m3min", 0.0)),
+                "a_ref_mm2": a_ref_in_mm2,
+                "dp_inH2O": dp,
+                "a_mean_mm2": r.get("a_mean_mm2"),
+                "a_eff_mm2": r.get("a_eff_mm2"),
+                "lift_mm": lift,
+                "d_valve_mm": d_in,
+            })
+            pts_ex.append({
+                "q_m3min": float(r.get("q_ex_m3min", 0.0)),
+                "a_ref_mm2": a_ref_ex_mm2,
+                "dp_inH2O": dp,
+                "a_mean_mm2": r.get("a_mean_mm2"),
+                "a_eff_mm2": r.get("a_eff_mm2"),
+                "lift_mm": lift,
+                "d_valve_mm": d_ex,
+            })
+        saecd_in = A.series_sae_cd(pts_in, units="SI")
+        saecd_ex = A.series_sae_cd(pts_ex, units="SI")
+        # Effective SAE CD (if a_eff present)
+        try:
+            effcd_in = A.series_effective_sae_cd(pts_in, units="SI")
+            effcd_ex = A.series_effective_sae_cd(pts_ex, units="SI")
+        except Exception:
+            effcd_in = []
+            effcd_ex = []
+        # Velocities (intake mean/effective)
+        v_mean = A.series_port_velocity(pts_in, units="SI")
+        try:
+            v_eff = A.series_effective_velocity(pts_in, units="SI")
+        except Exception:
+            v_eff = []
+        # Energy and energy density (intake)
+        energy = A.series_port_energy(pts_in, units="SI")
+        energy_density = A.series_port_energy_density(pts_in, units="SI")
+        # Observed per area (curtain) intake
+        obs_area = A.series_cfm_per_sq_area(pts_in, units="SI")
+        return {
+            "units": units,
+            "header": header_metrics,
+            "rows": table_rows,
+            "series": {
+                "x_lift": x_lift,
+                "x_ld": x_ld,
+                "flow_in": flow_in,
+                "flow_ex": flow_ex,
+                "saecd_in": saecd_in,
+                "saecd_ex": saecd_ex,
+                "effcd_in": effcd_in,
+                "effcd_ex": effcd_ex,
+                "v_mean": v_mean,
+                "v_eff": v_eff,
+                "energy": energy,
+                "energy_density": energy_density,
+                "observed_area": obs_area,
+            },
+        }
 
     if units == "US":
         # Validate and map to SI-compatible shapes under the hood
@@ -84,7 +158,75 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
 
         header_metrics = A.flowtest_header_metrics_SI(hdr_si)
         table_rows = A.flowtest_tables_SI(si_rows)
-        return {"units": units, "header": header_metrics, "rows": table_rows}
+        # X axes
+        x_lift = [r.get("lift_mm", 0.0) for r in si_rows]
+        x_ld = A.series_flow_vs_ld(si_rows, units="SI", axis_round=True)
+        flow_in = [r.get("q_in_m3min", 0.0) for r in si_rows]
+        flow_ex = [r.get("q_ex_m3min", 0.0) for r in si_rows]
+        import math
+        d_in = float(header.get("d_valve_in_mm", 0.0))
+        d_ex = float(header.get("d_valve_ex_mm", 0.0))
+        pts_in = []
+        pts_ex = []
+        for r in si_rows:
+            lift = float(r.get("lift_mm", 0.0))
+            dp = float(r.get("dp_inH2O", 28.0))
+            a_ref_in_mm2 = math.pi * d_in * lift
+            a_ref_ex_mm2 = math.pi * d_ex * lift
+            pts_in.append({
+                "q_m3min": float(r.get("q_in_m3min", 0.0)),
+                "a_ref_mm2": a_ref_in_mm2,
+                "dp_inH2O": dp,
+                "a_mean_mm2": r.get("a_mean_mm2"),
+                "a_eff_mm2": r.get("a_eff_mm2"),
+                "lift_mm": lift,
+                "d_valve_mm": d_in,
+            })
+            pts_ex.append({
+                "q_m3min": float(r.get("q_ex_m3min", 0.0)),
+                "a_ref_mm2": a_ref_ex_mm2,
+                "dp_inH2O": dp,
+                "a_mean_mm2": r.get("a_mean_mm2"),
+                "a_eff_mm2": r.get("a_eff_mm2"),
+                "lift_mm": lift,
+                "d_valve_mm": d_ex,
+            })
+        saecd_in = A.series_sae_cd(pts_in, units="SI")
+        saecd_ex = A.series_sae_cd(pts_ex, units="SI")
+        try:
+            effcd_in = A.series_effective_sae_cd(pts_in, units="SI")
+            effcd_ex = A.series_effective_sae_cd(pts_ex, units="SI")
+        except Exception:
+            effcd_in = []
+            effcd_ex = []
+        v_mean = A.series_port_velocity(pts_in, units="SI")
+        try:
+            v_eff = A.series_effective_velocity(pts_in, units="SI")
+        except Exception:
+            v_eff = []
+        energy = A.series_port_energy(pts_in, units="SI")
+        energy_density = A.series_port_energy_density(pts_in, units="SI")
+        obs_area = A.series_cfm_per_sq_area(pts_in, units="SI")
+        return {
+            "units": units,
+            "header": header_metrics,
+            "rows": table_rows,
+            "series": {
+                "x_lift": x_lift,
+                "x_ld": x_ld,
+                "flow_in": flow_in,
+                "flow_ex": flow_ex,
+                "saecd_in": saecd_in,
+                "saecd_ex": saecd_ex,
+                "effcd_in": effcd_in,
+                "effcd_ex": effcd_ex,
+                "v_mean": v_mean,
+                "v_eff": v_eff,
+                "energy": energy,
+                "energy_density": energy_density,
+                "observed_area": obs_area,
+            },
+        }
 
     raise ValueError("units must be 'US' or 'SI'")
 
@@ -95,6 +237,25 @@ def compare_tests(units: Units, mode: Mode, A_points: List[Dict[str, Any]], B_po
         raise ValueError("units must be 'US' or 'SI'")
     if mode not in ("lift", "ld"):
         raise ValueError("mode must be 'lift' or 'ld'")
+    # Normalize points: allow SI rows with q_in_m3min/q_ex_m3min and fill q_m3min if missing.
+    def _norm(points: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        out = []
+        for p in points:
+            q = p.get("q_m3min")
+            if units == "SI" and q is None:
+                # Prefer intake flow as default; if missing, try exhaust
+                q = p.get("q_in_m3min", p.get("q_ex_m3min"))
+                if q is not None:
+                    p = {**p, "q_m3min": q}
+            # Ensure d_valve key is present for LD if needed; try both in/ex
+            if units == "SI" and "d_valve_mm" not in p:
+                dv = p.get("d_valve_mm") or p.get("d_valve_in_mm") or p.get("d_valve_ex_mm")
+                if dv is not None:
+                    p = {**p, "d_valve_mm": dv}
+            out.append(p)
+        return out
+    A_points = _norm(A_points)
+    B_points = _norm(B_points)
     # Lightweight validation using FlowRow* models; extra fields allowed
     if units == "US":
         _ = [FlowRowUS(**p) for p in A_points]
