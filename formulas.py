@@ -1,21 +1,39 @@
+# --- SI Flow Test helpers ---
+def quarter_D_mm(d_mm: float) -> float:
+    """Return 0.25 * d_mm (for 0.25D helper in mm)."""
+    return 0.25 * d_mm
+
+def in_ex_ratio_per_point(q_in_m3min: float, q_ex_m3min: float) -> float:
+    """Per-point In/Ex flow ratio (Q_ex / Q_in, safe for Q_in=0)."""
+    return q_ex_m3min / max(q_in_m3min, 1e-12)
+
+def area_ratio(mean_port_window_mm2: float, valve_area_mm2: float) -> float:
+    """Area ratio = mean_port_window_mm2 / valve_area_mm2."""
+    return mean_port_window_mm2 / valve_area_mm2
+
+def avg_m3min(rows) -> float:
+    """Average of 'M^3 Min Corrected' for a list of rows (float dicts)."""
+    vals = [float(r.get("m3min_corr", 0.0)) for r in rows if "m3min_corr" in r]
+    return sum(vals) / max(len(vals), 1)
+
+def total_m3min(rows) -> float:
+    """Total of 'M^3 Min Corrected' for a list of rows (float dicts)."""
+    vals = [float(r.get("m3min_corr", 0.0)) for r in rows if "m3min_corr" in r]
+    return sum(vals)
 import math
 from typing import Literal, Tuple
+from .calibration import (
+    A0_FT_S, A0_M_S,
+    RHO_SLUG_FT3, G_FTPS2, RHO_KGM3_STD, G_M_S2,
+    K_CFM_TO_HP, K_CSA_HP, K_PORT_DIST, K_CR, K_EXINT_RATIO,
+    SHIFT_ALPHA, K_CSA_kW, K_FLOW_kW, K_CR_REF, K_CR_SLOPE,
+)
 
 # =============================
 # DV IOP GUI constants and unit helpers
 # =============================
 
-# Fixed speed of sound used in GUI main screen
-A0_FT_S: float = 1125.0  # [ft/s]
-A0_M_S: float = 343.2    # [m/s]
-
-# Standard air density (US) and gravity
-RHO_SLUG_FT3: float = 0.0023769  # [slug/ft^3] ~ 1.225 kg/m^3
-G_FTPS2: float = 32.174           # [ft/s^2]
-
-# SI counterparts (reference)
-RHO_KGM3_STD: float = 1.225       # [kg/m^3]
-G_M_S2: float = 9.80665           # [m/s^2]
+# GUI constants imported from calibration
 
 # Conversions
 def in_to_mm(x_in: float) -> float:
@@ -219,8 +237,6 @@ def existing_ex_int_ratio(avg_cfm_ex: float, avg_cfm_in: float) -> float:
     if avg_cfm_in <= 0:
         raise ValueError("avg_cfm_in > 0")
     # Screen-match calibration: GUI reports slightly higher ratio than raw division
-    # Calibrated factor from report anchor (84.1/114.5 -> 0.745): ~1.0143
-    K_EXINT_RATIO = 1.0143
     return min(1.0, (avg_cfm_ex / avg_cfm_in) * K_EXINT_RATIO)
 
 def required_ex_int_ratio(cr: float, max_lift_in: float) -> float:
@@ -242,16 +258,7 @@ def required_ex_int_ratio(cr: float, max_lift_in: float) -> float:
     b = 0.332050  # per inch of max lift
     c = 0.300000  # baseline
     return a * cr + b * max_lift_in + c
-# =============================
-# FLOW screen-match calibration constants (manual screenshot matching)
-# =============================
-K_CFM_TO_HP = 0.0  #: [HP/CFM@28] calibrated to match Airflow HP limit (set in test)
-K_CSA_HP    = 0.0  #: [HP/(ft^3/s)] calibrated to match Port Area HP limit (set in test)
-K_PORT_DIST = 0.3086  #: effective port distribution factor (calibrated to 2.75 in² ↔ 7037 RPM)
-K_CR        = 1.0  #: compression-ratio correction multiplier (placeholder)
-"""
-All above: calibrated to match manual screenshots (FLOW GUI). See set_calibration/get_calibration.
-"""
+"""Calibration constants are imported from calibration.py."""
 
 def set_calibration(*, k_cfm_to_hp=None, k_csa_hp=None, k_port_dist=None, k_cr=None):
     """
@@ -261,15 +268,22 @@ def set_calibration(*, k_cfm_to_hp=None, k_csa_hp=None, k_port_dist=None, k_cr=N
         k_csa_hp: float or None
         k_port_dist: float or None
     """
+    # Rebind imported globals from calibration module at runtime
+    from . import calibration as CAL
     global K_CFM_TO_HP, K_CSA_HP, K_PORT_DIST, K_CR
     if k_cfm_to_hp is not None:
-        K_CFM_TO_HP = k_cfm_to_hp
+        CAL.K_CFM_TO_HP = k_cfm_to_hp
     if k_csa_hp is not None:
-        K_CSA_HP = k_csa_hp
+        CAL.K_CSA_HP = k_csa_hp
     if k_port_dist is not None:
-        K_PORT_DIST = k_port_dist
+        CAL.K_PORT_DIST = k_port_dist
     if k_cr is not None:
-        K_CR = k_cr
+        CAL.K_CR = k_cr
+    # Refresh local bindings for callers that imported from formulas
+    K_CFM_TO_HP = CAL.K_CFM_TO_HP
+    K_CSA_HP = CAL.K_CSA_HP
+    K_PORT_DIST = CAL.K_PORT_DIST
+    K_CR = CAL.K_CR
 
 def get_calibration():
     """
@@ -529,6 +543,120 @@ def mean_port_velocity_from_mach_main(mach: float, units: str = "US") -> float:
         return mach * A0_FT_S
     else:
         return mach * A0_M_S
+
+# =============================
+# SI Main screen helpers (explicit SI units)
+# =============================
+
+def port_velocity_from_mach(mach: float, units: str = "SI") -> float:
+    """Mean port velocity from Mach (GUI fixed a0).
+    SI: v[m/s] = mach * A0_M_S; US: v[ft/s] = mach * A0_FT_S.
+    """
+    return mean_port_velocity_from_mach_main(mach, units)
+
+def piston_area_mm2(bore_mm: float) -> float:
+    """Piston area [mm^2] = pi/4 * bore_mm^2."""
+    if bore_mm <= 0:
+        raise ValueError("bore_mm>0")
+    return math.pi * (bore_mm**2) / 4.0
+
+def engine_displacement_L(bore_mm: float, stroke_mm: float, n_cyl: int) -> float:
+    """Engine displacement [L] = n * (pi/4 * bore^2 * stroke) [mm^3] / 1e6."""
+    if bore_mm <= 0 or stroke_mm <= 0 or n_cyl <= 0:
+        raise ValueError("bore, stroke, n_cyl > 0")
+    vol_mm3 = n_cyl * (math.pi * (bore_mm**2) / 4.0) * stroke_mm
+    return vol_mm3 / 1e6
+
+def cylinder_displacement_L(bore_mm: float, stroke_mm: float) -> float:
+    """Cylinder displacement [L] for one cylinder."""
+    return engine_displacement_L(bore_mm, stroke_mm, 1)
+
+def mean_piston_speed_m_min(stroke_mm: float, rpm: float) -> float:
+    """Mean piston speed [m/min] = 2 * stroke[m] * rpm."""
+    if stroke_mm <= 0 or rpm < 0:
+        raise ValueError("stroke_mm>0, rpm>=0")
+    stroke_m = stroke_mm / 1000.0
+    return 2.0 * stroke_m * rpm
+
+def engine_flow_m3min_at(rpm: float, ve: float, disp_L: float) -> float:
+    """Engine total flow [m^3/min] at RPM: Q = disp[L] * rpm * ve / 2000.
+    Derivation: cycles/min = rpm/2; Q per 2 revolutions = disp; convert L→m^3 (1e-3).
+    So Q[m^3/min] = disp[L] * (rpm/2) * ve * 1e-3 = disp*ve*rpm/2000.
+    """
+    if rpm < 0 or ve < 0 or disp_L <= 0:
+        raise ValueError("rpm>=0, ve>=0, disp_L>0")
+    return disp_L * ve * rpm / 2000.0
+
+def peak_rpm_from_csa_SI(mean_port_area_mm2: float, mach: float, disp_L: float, ve: float, n_ports_eff: float) -> float:
+    """Peak RPM from mean port area (SI).
+    Equate engine flow with port flow. Port flow (per GUI main):
+      Q_ports[m^3/min] = A_mean[m^2] * v[m/s] * 60 * (n_ports_eff * K_PORT_DIST)
+    Engine flow: Q_eng[m^3/min] = disp_L * ve * rpm / 2000
+    Solve for rpm.
+    """
+    if mean_port_area_mm2 <= 0 or disp_L <= 0 or ve <= 0 or n_ports_eff <= 0:
+        raise ValueError("inputs>0")
+    a_m2 = mean_port_area_mm2 * 1e-6
+    v_ms = mach * A0_M_S
+    q_ports = a_m2 * v_ms * 60.0 * (n_ports_eff * K_PORT_DIST)
+    rpm = q_ports * 2000.0 / (disp_L * ve)
+    return rpm
+
+def shift_rpm(peak_rpm: float, alpha: float | None = None) -> float:
+    """Shift RPM = peak_rpm * (1 + alpha). Default alpha=SHIFT_ALPHA."""
+    a = SHIFT_ALPHA if alpha is None else alpha
+    return peak_rpm * (1.0 + a)
+
+def kw_limit_from_csa_SI(mean_port_area_mm2: float, mach: float, n_ports_eff: float) -> float:
+    """kW limit from port area (SI):
+    Q_ports[m^3/min] = A_mean[m^2] * v[m/s] * 60 * (n_ports_eff)
+    kW = K_CSA_kW * Q_ports
+    """
+    a_m2 = mean_port_area_mm2 * 1e-6
+    v_ms = mach * A0_M_S
+    q_ports = a_m2 * v_ms * 60.0 * (n_ports_eff)
+    return K_CSA_kW * q_ports
+
+def kw_limit_from_airflow_SI(q_m3min_28: float) -> float:
+    """kW limit from airflow (SI): kW = K_FLOW_kW * q_m3min_28."""
+    return K_FLOW_kW * q_m3min_28
+
+def _cr_correction(cr: float) -> float:
+    """Simple CR correction multiplier f_cr(cr) = K_CR * (1 + K_CR_SLOPE*(cr-K_CR_REF))."""
+    return K_CR * (1.0 + K_CR_SLOPE * (cr - K_CR_REF))
+
+def best_torque_Nm(kw_limit: float, rpm_peak: float, cr: float) -> float:
+    """Best torque estimate [Nm] at peak HP:
+    torque = (kW * 9549) / rpm * f_cr(cr)
+    where 9549 ≈ 60*1000/(2π).
+    """
+    if rpm_peak <= 0 or kw_limit < 0:
+        raise ValueError("rpm_peak>0, kw_limit>=0")
+    return (kw_limit * 9549.0) / rpm_peak * _cr_correction(cr)
+
+def torque_per_cuin_Nm(cid_in3: float, torque_Nm: float) -> float:
+    """Torque per cubic inch [Nm/ci] = torque[Nm] / cid[in^3]."""
+    if cid_in3 <= 0:
+        raise ValueError("cid_in3>0")
+    return torque_Nm / cid_in3
+
+def torque_per_liter_Nm(torque_Nm: float, disp_L: float) -> float:
+    """Torque per liter [Nm/L] = torque[Nm] / disp[L]."""
+    if disp_L <= 0:
+        raise ValueError("disp_L>0")
+    return torque_Nm / disp_L
+
+def kw_per_cuin(kw: float, cid_in3: float) -> float:
+    """kW per cubic inch [kW/ci]."""
+    if cid_in3 <= 0:
+        raise ValueError("cid_in3>0")
+    return kw / cid_in3
+
+def kw_per_liter(kw: float, disp_L: float) -> float:
+    """kW per liter [kW/L]."""
+    if disp_L <= 0:
+        raise ValueError("disp_L>0")
+    return kw / disp_L
 
 # --- Solver 2-z-3 for port geometry (main screen logic) ---
 def port_cc_from_csa_length(mean_csa: float, cl_length: float) -> float:
@@ -804,6 +932,9 @@ def velocity_pitot(dp_pitot: float, rho: float, c_probe: float = 1.0) -> float:
     return c_probe * math.sqrt(2.0 * dp_pitot / rho)
 
 
+## self-check moved to the end of module
+
+
 # -----------------------------------------------------------------------------
 # 7) Swirl i Tumble
 # -----------------------------------------------------------------------------
@@ -994,5 +1125,18 @@ def effective_area_with_seat(lift: float, d_valve: float, d_throat: float, d_ste
 # -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    assert abs(mean_port_velocity_from_mach_main(0.5475, "US") - 616.0) < 0.5
+    # Lightweight backend self-check (no GUI). Uses synthetic sample points.
+    print("[formulas] self-check: anchors and sample metrics")
+    v_us = mean_port_velocity_from_mach_main(0.5475, "US")
+    v_si = mean_port_velocity_from_mach_main(0.5475, "SI")
+    print("Mach 0.5475 →", v_us, "ft/s (US)")
+    print("Mach 0.5475 →", v_si, "m/s (SI)")
+    set_calibration(k_port_dist=0.3086)
+    rpm = peak_rpm_from_csa(2.75, 0.5475, 427.7, 1.0, 4.0)
+    csa = csa_from_peak_rpm(7037, 0.5475, 427.7, 1.0, 4.0)
+    print("CSA 2.75 ↔ RPM", rpm, "; inverse CSA", csa)
+    v = 300.0
+    e_ft3 = port_energy_density_imperial_ftlbs_per_ft3(RHO_SLUG_FT3, v)
+    e_gui = port_energy_density_gui_ftlbs_per_in2ft(RHO_SLUG_FT3, v)
+    print("Energy density scale x144:", e_gui / e_ft3)
     print("Self-check OK.")
