@@ -66,25 +66,27 @@ class CompareTab(QtWidgets.QWidget):
             {"lift_mm": 6.0, "q_m3min": 0.52, "a_mean_mm2": 300.0, "d_valve_mm": 44.0},
             {"lift_mm": 10.0, "q_m3min": 0.82, "a_mean_mm2": 300.0, "d_valve_mm": 44.0}]
         data = api.compare_tests(units, mode, A_points, B_points)
-        x = data["xB"]
-        # Pick metric
+        x_map = data.get("x", {})
+        x = x_map.get("lift_mm", []) if mode == "lift" else x_map.get("ld_int", [])
+        # Pick metric (default to intake side)
         metric_key = self.metric.currentText()
-        series_map = {
-            "Flow": ("flowA","flowB","flowPct"),
-            "SAE CD": ("cdA","cdB","cdPct"),
-            "Eff SAE CD": ("effcdA","effcdB","effcdPct"),
-            "v_mean": ("velA","velB","velPct"),
-            "v_eff": ("effvelA","effvelB","effvelPct"),
-            "Energy": ("energyA","energyB","energyPct"),
-            "Energy Density": ("energyDensityA","energyDensityB","energyDensityPct"),
-            "Observed/area": ("areaA","areaB","areaPct"),
+        base_map = {
+            "Flow": "flow_int",
+            "SAE CD": "sae_cd_int",
+            "Eff SAE CD": "eff_cd_int",
+            "v_mean": "v_mean_int",
+            "v_eff": "v_eff_int",
+            "Energy": "energy_int",
+            "Energy Density": "energy_density_int",
+            "Observed/area": "observed_per_area_int",
         }
-        a_key, b_key, p_key = series_map.get(metric_key, ("flowA","flowB","flowPct"))
-        yA, yB = data[a_key], data[b_key]
+        base = base_map.get(metric_key, "flow_int")
+        yA = data["A"].get(base, [])
+        yB = data["B"].get(base, [])
+        pct_vals = data.get("delta_pct", {}).get(base, [])
         self.plot.clear()
         self.plot.add_series("A", x, yA, "intake")
         self.plot.add_series("B", x, yB, "exhaust")
-        pct_vals = data[p_key]
         # Optionally draw %Δ series by sign (two series: pos/neg)
         if self.show_pct.isChecked():
             x_pos = [xx for xx, vv in zip(x, pct_vals) if vv is not None and vv > 0]

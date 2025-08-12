@@ -20,21 +20,20 @@ class FlowTestTab(QtWidgets.QWidget):
     def _build_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
 
+        # Top controls
         top = QtWidgets.QHBoxLayout()
-        self.units = QtWidgets.QComboBox(); self.units.addItems(["SI","US"])
+        self.units = QtWidgets.QComboBox(); self.units.addItems(["SI", "US"])
         self.max_lift = LabeledSpin("Max lift", "mm")
         self.cr = LabeledSpin("CR")
         self.d_in = LabeledSpin("Valve In", "mm")
         self.d_ex = LabeledSpin("Valve Ex", "mm")
-        self.calc = QtWidgets.QPushButton("Przelicz")
-        self.calc.clicked.connect(self.on_compute)
-        self.btn_import_si = QtWidgets.QPushButton("Import TXT (SI)")
-        self.btn_import_us = QtWidgets.QPushButton("Import TXT (US)")
-        self.btn_import_si.clicked.connect(self.on_import_si)
-        self.btn_import_us.clicked.connect(self.on_import_us)
+        self.calc = QtWidgets.QPushButton("Przelicz"); self.calc.clicked.connect(self.on_compute)
+        self.btn_import_si = QtWidgets.QPushButton("Import TXT (SI)"); self.btn_import_si.clicked.connect(self.on_import_si)
+        self.btn_import_us = QtWidgets.QPushButton("Import TXT (US)"); self.btn_import_us.clicked.connect(self.on_import_us)
         for w in [self.units, self.max_lift, self.cr, self.d_in, self.d_ex, self.calc, self.btn_import_si, self.btn_import_us]:
             top.addWidget(w)
 
+        # Table and plot
         self.table = QtWidgets.QTableView()
         self.plot = Plot()
 
@@ -44,20 +43,21 @@ class FlowTestTab(QtWidgets.QWidget):
         self.chk_in = QtWidgets.QCheckBox("Intake")
         self.chk_ex = QtWidgets.QCheckBox("Exhaust")
         self.chk_in.setChecked(True); self.chk_ex.setChecked(True)
-        self.btn_export_png = QtWidgets.QPushButton("Export PNG")
-        self.btn_export_png.clicked.connect(self.on_export_png)
+        self.btn_export_png = QtWidgets.QPushButton("Export PNG"); self.btn_export_png.clicked.connect(self.on_export_png)
         for w in [QtWidgets.QLabel("Axis:"), self.axis, self.chk_in, self.chk_ex, self.btn_export_png]:
             controls.addWidget(w)
 
+        # Assemble layout
         layout.addLayout(top)
         layout.addWidget(self.table)
         layout.addWidget(self.plot.widget)
         layout.addLayout(controls)
 
         # cache of last compute
-        self._last_series: Dict[str, List[float]] = {}
-        self._last_rows: List[Dict[str, Any]] = []
-        self._last_units: str = "SI"
+        self._last_series = {}
+        self._last_x = {}
+        self._last_rows = []
+        self._last_units = "SI"
 
     def on_compute(self):
         units = self.units.currentText()
@@ -115,6 +115,7 @@ class FlowTestTab(QtWidgets.QWidget):
     def _render(self, units: str, header: Dict[str, Any], rows: List[Dict[str, Any]]):
         data = api.flowtest_compute(units, header, rows)
         self._last_series = data.get("series", {})
+        self._last_x = data.get("x", {})
         self._last_rows = rows
         self._last_units = units
         # Table basic view
@@ -131,9 +132,13 @@ class FlowTestTab(QtWidgets.QWidget):
     def _update_plot_from_series(self):
         if not self._last_series:
             return
-        x = self._last_series["x_lift"] if self.axis.currentText() == "lift" else self._last_series["x_ld"]
         self.plot.clear()
+        if self.axis.currentText() == "lift":
+            x_int = x_ex = self._last_x.get("lift_mm", [])
+        else:
+            x_int = self._last_x.get("ld_int", [])
+            x_ex = self._last_x.get("ld_ex", [])
         if self.chk_in.isChecked():
-            self.plot.add_series("Intake", x, self._last_series.get("flow_in", []), "intake")
+            self.plot.add_series("Intake", x_int, self._last_series.get("flow_int", []), "intake")
         if self.chk_ex.isChecked():
-            self.plot.add_series("Exhaust", x, self._last_series.get("flow_ex", []), "exhaust")
+            self.plot.add_series("Exhaust", x_ex, self._last_series.get("flow_ex", []), "exhaust")
