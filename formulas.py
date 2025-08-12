@@ -1,40 +1,142 @@
+import math
+def port_velocity(q_cfm: float, mean_area_in2: float) -> float:
+    """
+    Mean port velocity [ft/s]:
+        V_mean = Q_cfm / mean_area_in2 * 144 / 60
+    Args:
+        q_cfm: flow [CFM]
+        mean_area_in2: mean port area [in²]
+    Returns:
+        float: mean port velocity [ft/s]
+    """
+    if mean_area_in2 <= 0:
+        raise ValueError("mean_area_in2 > 0")
+    return q_cfm / mean_area_in2 * 144 / 60
+
+def effective_velocity(q_cfm: float, a_eff_in2: float) -> float:
+    """
+    Effective velocity [ft/s]:
+        V_eff = Q_cfm / A_eff * 144 / 60
+    Args:
+        q_cfm: flow [CFM]
+        a_eff_in2: effective area [in²]
+    Returns:
+        float: effective velocity [ft/s]
+    """
+    if a_eff_in2 <= 0:
+        raise ValueError("a_eff_in2 > 0")
+    return q_cfm / a_eff_in2 * 144 / 60
+
+def effective_sae_cd(q_cfm: float, dp_inH2O: float, rho_kgm3: float, a_eff_in2: float) -> float:
+    """
+    Effective SAE CD (can exceed 1):
+        CD_eff = Q / (A_eff * v_ref)
+        v_ref = sqrt(2*dp*249.08891/rho) [ft/s], dp in inH2O, rho in kg/m³
+    Args:
+        q_cfm: flow [CFM]
+        dp_inH2O: pressure drop [inH2O]
+        rho_kgm3: air density [kg/m³]
+        a_eff_in2: effective area [in²]
+    Returns:
+        float: effective SAE CD
+    """
+    if a_eff_in2 <= 0 or rho_kgm3 <= 0 or dp_inH2O <= 0:
+        raise ValueError("a_eff_in2, rho_kgm3, dp_inH2O > 0")
+    v_ref = (2 * dp_inH2O * 249.08891 / rho_kgm3) ** 0.5
+    a_eff_ft2 = a_eff_in2 / 144.0
+    q_cfs = q_cfm / 60.0
+    return q_cfs / (a_eff_ft2 * v_ref)
+
+def port_energy(q_cfm: float, v_ft_s: float, rho_kgm3: float = 1.2) -> float:
+    """
+    Port energy [ft-lbf/min]:
+        E = 0.5 * rho * v^2 * Q [ft³/min], rho in kg/m³, v in ft/s
+        (Q in ft³/min, convert to ft³/s for SI, but here use ft³/min for GUI)
+    Args:
+        q_cfm: flow [CFM]
+        v_ft_s: velocity [ft/s]
+        rho_kgm3: air density [kg/m³] (default 1.2 for 70°F)
+    Returns:
+        float: port energy [ft-lbf/min]
+    """
+    # 1 kg/m³ = 0.06243 lb/ft³
+    rho_lbft3 = rho_kgm3 * 0.06243
+    return 0.5 * rho_lbft3 * v_ft_s**2 * q_cfm
+
+"""
+GUI/Report screen-match helpers
+"""
+
+def port_energy_density_gui(v_ft_s: float, rho_kgm3: float = 1.2) -> float:
+    """
+    Port energy density [ft-lbf/(in²·ft)] for GUI:
+        EED = 144 * (0.5 * rho * v^2) [ft-lbf/(in²·ft)]
+    Args:
+        v_ft_s: velocity [ft/s]
+        rho_kgm3: air density [kg/m³] (default 1.2 for 70°F)
+    Returns:
+        float: port energy density [ft-lbf/(in²·ft)]
+    """
+    rho_lbft3 = rho_kgm3 * 0.06243
+    return 144 * 0.5 * rho_lbft3 * v_ft_s**2
+
+def quarter_D_thou(d_in: float) -> float:
+    """
+    0.25·D helper [thou]:
+        = 0.25 * d_in * 1000
+    Args:
+        d_in: diameter [in]
+    Returns:
+        float: 0.25·D in thou
+    """
+    if d_in <= 0:
+        raise ValueError("d_in > 0")
+    return 0.25 * d_in * 1000
+
+def ld_axis_tick(x: float) -> float:
+    """
+    L/D axis rounding: ceil to next 0.01
+    Args:
+        x: value
+    Returns:
+        float: rounded up to next 0.01
+    """
+    return math.ceil(x * 100) / 100
 # --- GUI/Report screen-match helpers ---
+
 def mean_piston_speed_ftmin(stroke_in: float, rpm: float) -> float:
     """
-    Mean piston speed [ft/min]:
-        MPS = 2 * stroke_in / 12 * rpm
+    Mean piston speed [ft/min]: MPS = 2 * stroke_in/12 * rpm.
     Args:
-        stroke_in: stroke [in]
-        rpm: engine speed [rev/min]
+        stroke_in: stroke [in] (>0)
+        rpm: engine speed [rev/min] (>=0)
     Returns:
         float: mean piston speed [ft/min]
     """
     if stroke_in <= 0 or rpm < 0:
         raise ValueError("stroke_in > 0, rpm >= 0")
-    return 2 * stroke_in / 12.0 * rpm
+    return 2.0 * stroke_in / 12.0 * rpm
 
 def observed_cfm_per_sq_in(q_cfm: float, d_valve_in: float, lift_in: float) -> float:
     """
-    Observed CFM per sq.in (as in GUI):
-        = q_cfm / (π * d_valve_in * lift_in)
+    Observed CFM per Sq.In (curtain-based): Q_cfm / (pi * d_valve_in * lift_in) [CFM/in^2].
     Args:
-        q_cfm: measured flow [CFM]
-        d_valve_in: valve diameter [in]
-        lift_in: valve lift [in]
+        q_cfm: flow [CFM]
+        d_valve_in: valve head diameter [in] (>0)
+        lift_in: valve lift [in] (>0)
     Returns:
-        float: observed CFM per sq.in
+        float: CFM per Sq.In (curtain)
     """
     if d_valve_in <= 0 or lift_in <= 0:
-        raise ValueError("d_valve_in, lift_in > 0")
+        raise ValueError("d_valve_in > 0, lift_in > 0")
     return q_cfm / (math.pi * d_valve_in * lift_in)
 
 def existing_ex_int_ratio(avg_cfm_ex: float, avg_cfm_in: float) -> float:
     """
-    Existing exhaust/intake ratio (GUI):
-        = avg_cfm_ex / avg_cfm_in
+    Existing exhaust/intake ratio: avg_cfm_ex / avg_cfm_in.
     Args:
-        avg_cfm_ex: average exhaust CFM
-        avg_cfm_in: average intake CFM
+        avg_cfm_ex: average exhaust CFM (>=0)
+        avg_cfm_in: average intake CFM (>0)
     Returns:
         float: ratio (dimensionless)
     """
@@ -139,12 +241,12 @@ def csa_from_peak_rpm(peak_rpm: float, mach: float, cid_in3: float, ve_peak: flo
 # --- Valve/port geometry helpers (FLOW GUI, per valve/port) ---
 def area_curtain(d_valve_m: float, lift_m: float) -> float:
     """
-    Curtain area: A_curtain = π * d_v * lift  [m²].
+    Curtain area: A_curtain = π * d_v * lift  [m^2].
     Args:
         d_valve_m: valve head diameter [m]
         lift_m: valve lift [m]
     Returns:
-        float: curtain area [m²]
+        float: curtain area [m^2]
     """
     if d_valve_m <= 0 or lift_m < 0:
         raise ValueError("d_valve_m > 0, lift_m >= 0")
@@ -152,14 +254,14 @@ def area_curtain(d_valve_m: float, lift_m: float) -> float:
 
 def area_seat_limited(d_valve_m: float, lift_m: float, seat_angle_deg: float, seat_width_m: float) -> float:
     """
-    Seat-limited area: A_seat = π * d_v * min(lift, seat_width * tanθ)  [m²], θ=deg→rad.
+    Seat-limited area: A_seat = π * d_v * min(lift, seat_width * tanθ)  [m^2], θ=deg→rad.
     Args:
         d_valve_m: valve head diameter [m]
         lift_m: valve lift [m]
         seat_angle_deg: seat angle [deg]
         seat_width_m: seat width [m]
     Returns:
-        float: seat-limited area [m²]
+        float: seat-limited area [m^2]
     """
     if d_valve_m <= 0 or lift_m < 0 or seat_width_m < 0:
         raise ValueError("d_valve_m > 0, lift_m >= 0, seat_width_m >= 0")
@@ -169,12 +271,12 @@ def area_seat_limited(d_valve_m: float, lift_m: float, seat_angle_deg: float, se
 
 def area_throat(d_throat_m: float, d_stem_m: float) -> float:
     """
-    Throat area: A_throat = π/4 * (d_throat² − d_stem²)  [m²].
+    Throat area: A_throat = π/4 * (d_throat^2 − d_stem^2)  [m^2].
     Args:
         d_throat_m: throat diameter [m]
         d_stem_m: stem diameter [m]
     Returns:
-        float: throat area [m²]
+        float: throat area [m^2]
     """
     if d_throat_m <= 0 or d_stem_m < 0 or d_stem_m >= d_throat_m:
         raise ValueError("d_throat_m > 0, 0 <= d_stem_m < d_throat_m")
@@ -183,9 +285,9 @@ def area_throat(d_throat_m: float, d_stem_m: float) -> float:
 from typing import Literal
 def area_port_window_radiused(width_m: float, height_m: float, r_top_m: float, r_bot_m: float, *, model: Literal["rect_with_2r","racetrack"]="rect_with_2r") -> float:
     """
-    Approximate port window area [m²] (stadium/racetrack or rectangle with 2 radii).
-    model="rect_with_2r": A = w*h - 2*(1-π/4)*(r_top² + r_bot²)
-    model="racetrack":   A = (w - 2r)*h + π*r², r = (r_top + r_bot)/2
+    Approximate port window area [m^2] (stadium/racetrack or rectangle with 2 radii).
+    model="rect_with_2r": A = w*h - 2*(1-π/4)*(r_top^2 + r_bot^2)
+    model="racetrack":   A = (w - 2r)*h + π*r^2, r = (r_top + r_bot)/2
     Args:
         width_m: port width [m]
         height_m: port height [m]
@@ -193,7 +295,7 @@ def area_port_window_radiused(width_m: float, height_m: float, r_top_m: float, r
         r_bot_m: bottom radius [m]
         model: "rect_with_2r" or "racetrack"
     Returns:
-        float: port window area [m²]
+        float: port window area [m^2]
     Note: This is an approximation matching the manual's drawing method; use for mean_csa/verification only.
     """
     if width_m <= 0 or height_m <= 0 or r_top_m < 0 or r_bot_m < 0:
@@ -201,8 +303,8 @@ def area_port_window_radiused(width_m: float, height_m: float, r_top_m: float, r
     if model == "rect_with_2r":
         return width_m * height_m - 2 * (1 - math.pi/4) * (r_top_m**2 + r_bot_m**2)
     elif model == "racetrack":
-        r = 0.5 * (r_top_m + r_bot_m)
-        return (width_m - 2*r) * height_m + math.pi * r**2
+        # Use separate radii: A = (w - (r_top + r_bot)) * h + (pi/2)*(r_top^2 + r_bot^2)
+        return (width_m - (r_top_m + r_bot_m)) * height_m + (math.pi/2.0) * (r_top_m**2 + r_bot_m**2)
     else:
         raise ValueError("model must be 'rect_with_2r' or 'racetrack'")
 
@@ -214,7 +316,7 @@ def throat_area_multi(d_throat_m: float, d_stem_m: float, n_valves: int) -> floa
         d_stem_m: stem diameter [m]
         n_valves: number of valves (int)
     Returns:
-        float: total throat area [m²]
+        float: total throat area [m^2]
     """
     if n_valves < 1:
         raise ValueError("n_valves >= 1")
@@ -230,7 +332,7 @@ def effective_area_with_seat_multi(lift: float, d_valve: float, d_throat: float,
         n_valves: number of valves
         method: blend/smoothmin
     Returns:
-        float: total effective area [m²]
+        float: total effective area [m^2]
     """
     if n_valves < 1:
         raise ValueError("n_valves >= 1")
@@ -287,7 +389,7 @@ def hp_limit_from_csa(mean_csa_in2: float, mach: float, n_ports_eff: float) -> f
         float: HP limit
     Source: calibration from manual, FLOW GUI
     """
-    port_vol_ft3s = mean_csa_in2 * (1/144) * mach * A0_FT_S * n_ports_eff
+    port_vol_ft3s = mean_csa_in2 * (1/144) * mach * A0_FT_S * 60.0 * n_ports_eff
     return K_CSA_HP * port_vol_ft3s
 # =============================
 # Vizard FLOW 1:1 helpers & calibration constants
@@ -730,6 +832,7 @@ def rpm_from_csa(A_avg: float, displ_L: float, ve: float, v_target: float) -> fl
 def mach_at_min_csa(q: float, a_min: float, T: float) -> float:
     """Mach w minimum CSA dla przepływu Q."""
     v = velocity_from_flow(q, a_min)
+    return mach_from_velocity(v, T)
 
 # --- FLOW helpers ---
 def port_energy_density(rho: float, v: float) -> float:
