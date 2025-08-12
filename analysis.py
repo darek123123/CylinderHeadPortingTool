@@ -29,12 +29,46 @@ def flowtest_header_metrics_SI(inputs: dict) -> dict:
     quarterD_ex_mm = F.quarter_D_mm(inputs["d_valve_ex_mm"])
     avg_m3min_in = F.avg_m3min(inputs["rows_in"])
     avg_m3min_ex = F.avg_m3min(inputs["rows_ex"])
-    total_m3min_in = F.total_m3min(inputs["rows_in"])
-    total_m3min_ex = F.total_m3min(inputs["rows_ex"])
+    # If rows carry dp_inH2O, first correct each to 28" then sum; else use provided totals
+    rows_in = inputs["rows_in"]
+    rows_ex = inputs["rows_ex"]
+    if rows_in and isinstance(rows_in[0], dict) and "dp_inH2O" in rows_in[0]:
+        meas = F.AirState(101325.0, F.C_to_K(20.0), 0.0)
+        ref = meas
+        total_m3min_in = sum([
+            F.flow_to_28inH2O(r["m3min_corr"] / 60.0, r.get("dp_inH2O", 28.0), meas, ref) * 60.0 for r in rows_in
+        ])
+        total_m3min_ex = sum([
+            F.flow_to_28inH2O(r["m3min_corr"] / 60.0, r.get("dp_inH2O", 28.0), meas, ref) * 60.0 for r in rows_ex
+        ])
+    else:
+        total_m3min_in = F.total_m3min(rows_in)
+        total_m3min_ex = F.total_m3min(rows_ex)
     # Convert max_lift_mm to inches for required_ex_int_ratio calibration
     max_lift_in = inputs["max_lift_mm"] / 25.4
     required_ratio = F.required_ex_int_ratio(inputs["cr"], max_lift_in)
-    existing_ratio = F.existing_ex_int_ratio(avg_m3min_ex, avg_m3min_in)
+    # Existing ratio: optionally allow subset of rows and optional bypass of calibration tweak
+    ratio_rows_in = inputs.get("rows_for_ratio_in", rows_in)
+    ratio_rows_ex = inputs.get("rows_for_ratio_ex", rows_ex)
+    if ratio_rows_in and isinstance(ratio_rows_in[0], dict) and "dp_inH2O" in ratio_rows_in[0]:
+        meas = F.AirState(101325.0, F.C_to_K(20.0), 0.0)
+        ref = meas
+        sel_total_in = sum([
+            F.flow_to_28inH2O(r["m3min_corr"] / 60.0, r.get("dp_inH2O", 28.0), meas, ref) * 60.0 for r in ratio_rows_in
+        ])
+        sel_total_ex = sum([
+            F.flow_to_28inH2O(r["m3min_corr"] / 60.0, r.get("dp_inH2O", 28.0), meas, ref) * 60.0 for r in ratio_rows_ex
+        ])
+    else:
+        sel_total_in = F.total_m3min(ratio_rows_in)
+        sel_total_ex = F.total_m3min(ratio_rows_ex)
+    if sel_total_in <= 0:
+        existing_ratio = 0.0
+    else:
+        if inputs.get("exint_apply_calibration", True):
+            existing_ratio = F.existing_ex_int_ratio(sel_total_ex, sel_total_in, mode="total")
+        else:
+            existing_ratio = sel_total_ex / sel_total_in
     return dict(
         area_window_in_mm2=area_window_in_mm2,
         area_window_ex_mm2=area_window_ex_mm2,
@@ -48,8 +82,8 @@ def flowtest_header_metrics_SI(inputs: dict) -> dict:
         avg_m3min_ex=avg_m3min_ex,
         total_m3min_in=total_m3min_in,
         total_m3min_ex=total_m3min_ex,
-        required_ratio=required_ratio,
-        existing_ratio=existing_ratio,
+    required_ratio=required_ratio,
+    existing_ratio=existing_ratio,
     )
 
 def flowtest_tables_SI(test_rows):
@@ -133,24 +167,30 @@ def series_cfm_per_sq_area(points: List[Dict], units: Literal["US","SI"]) -> Lis
 
 
 def series_sae_cd(points: List[Dict], units: Literal["US", "SI"] = "US") -> List[float]:
-    cds = []
+    def _a_ref_to_m2(pt: Dict) -> float:
+        # Accept any of the following keys and normalize to m^2
+        if "a_ref_m2" in pt and pt["a_ref_m2"] is not None:
+            return float(pt["a_ref_m2"])
+        if "a_ref_mm2" in pt and pt["a_ref_mm2"] is not None:
+            return float(pt["a_ref_mm2"]) * 1e-6
+        if "a_ref_in2" in pt and pt["a_ref_in2"] is not None:
+            # in^2 → m^2 (via mm^2 then to m^2 for consistency with existing helpers)
+            return F.in2_to_mm2(float(pt["a_ref_in2"])) * 1e-6
+        raise KeyError("Missing a_ref (expected one of: a_ref_m2, a_ref_mm2, a_ref_in2)")
+
+    cds: List[float] = []
     for p in points:
+        # Flow to m^3/s
         if units == "US":
-            a_ref_m2 = F.mm2_to_in2(p["a_ref_mm2"])  # If provided in mm^2, convert; else require m^2
-            # Prefer a_ref in m^2 for SAE; for simplicity accept provided 'a_ref_m2'
-            a_ref = p.get("a_ref_m2")
-            if a_ref is None:
-                a_ref = (p["a_ref_mm2"]) * 1e-6
-            q_m3s = F.cfm_to_m3s(p["q_cfm"])
-            dp_Pa = F.in_h2o_to_pa(p["dp_inH2O"]) if "dp_inH2O" in p else F.in_h2o_to_pa(28.0)
-            rho = p.get("rho_kgm3", 1.225)
-            cds.append(F.cd(q_m3s, a_ref, dp_Pa, rho))
+            q_m3s = F.cfm_to_m3s(p["q_cfm"]) if "q_cfm" in p else (p.get("q_m3min", 0.0) / 60.0)
+            dp_Pa = F.in_h2o_to_pa(p["dp_inH2O"]) if "dp_inH2O" in p else p.get("dp_Pa", F.in_h2o_to_pa(28.0))
         else:
-            q_m3s = p["q_m3min"] / 60.0
-            a_ref = (p["a_ref_mm2"]) * 1e-6
-            dp_Pa = p.get("dp_Pa", F.in_h2o_to_pa(28.0))
-            rho = p.get("rho_kgm3", 1.225)
-            cds.append(F.cd(q_m3s, a_ref, dp_Pa, rho))
+            q_m3s = (p["q_m3min"] / 60.0) if "q_m3min" in p else F.cfm_to_m3s(p.get("q_cfm", 0.0))
+            # Accept dp in Pa or inH2O for SI too
+            dp_Pa = p.get("dp_Pa", F.in_h2o_to_pa(p.get("dp_inH2O", 28.0)))
+        a_ref = _a_ref_to_m2(p)
+        rho = p.get("rho_kgm3", 1.225)
+        cds.append(F.cd(q_m3s, a_ref, dp_Pa, float(rho)))
     return cds
 
 
