@@ -1,0 +1,9 @@
+/* Dark theme */
+* { color: #ECEFF1; }
+QWidget { background: #121212; }
+QGroupBox { border: 1px solid #263238; border-radius: 6px; margin-top: 8px; }
+QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; color: #90A4AE; }
+QLineEdit, QDoubleSpinBox, QSpinBox, QComboBox { background: #1E1E1E; border: 1px solid #263238; border-radius: 4px; padding: 2px 4px; }
+QPushButton { background: #263238; border: 1px solid #37474F; border-radius: 4px; padding: 4px 8px; }
+QPushButton:hover { background: #37474F; }
+QHeaderView::section { background: #1E1E1E; color: #B0BEC5; border: none; }
