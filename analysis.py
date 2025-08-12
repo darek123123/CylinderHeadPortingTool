@@ -1,6 +1,6 @@
 from typing import List, Dict, Literal
 from . import formulas as F
-from .calibration import A0_FT_S, A0_M_S, RHO_SLUG_FT3, RHO_KGM3_STD
+from .calibration import A0_FT_S, A0_M_S, RHO_SLUG_FT3, RHO_KGM3_STD, EX_PIPE_ENABLED_DEFAULT
 
 # --- SI Flow Test series and header/table packers ---
 def series_in_ex_ratio_per_point(test_rows):
@@ -27,8 +27,14 @@ def flowtest_header_metrics_SI(inputs: dict) -> dict:
     area_ratio_ex = F.area_ratio(area_window_ex_mm2, valve_area_ex_mm2)
     quarterD_in_mm = F.quarter_D_mm(inputs["d_valve_in_mm"])
     quarterD_ex_mm = F.quarter_D_mm(inputs["d_valve_ex_mm"])
-    avg_m3min_in = F.avg_m3min(inputs["rows_in"])
-    avg_m3min_ex = F.avg_m3min(inputs["rows_ex"])
+    # Optional exhaust pipe effect
+    ex_pipe_used = bool(inputs.get("ex_pipe_used", EX_PIPE_ENABLED_DEFAULT))
+    # Averages (apply pipe factor only to exhaust side)
+    rin = inputs["rows_in"]; rex = inputs["rows_ex"]
+    avg_m3min_in = F.avg_m3min(rin)
+    avg_m3min_ex_raw = F.avg_m3min(rex)
+    from . import calibration as CAL
+    avg_m3min_ex = F.apply_exhaust_pipe_effect(avg_m3min_ex_raw, ex_pipe_used, CAL.K_EX_PIPE)
     # If rows carry dp_inH2O, first correct each to 28" then sum; else use provided totals
     rows_in = inputs["rows_in"]
     rows_ex = inputs["rows_ex"]
@@ -38,12 +44,13 @@ def flowtest_header_metrics_SI(inputs: dict) -> dict:
         total_m3min_in = sum([
             F.flow_to_28inH2O(r["m3min_corr"] / 60.0, r.get("dp_inH2O", 28.0), meas, ref) * 60.0 for r in rows_in
         ])
-        total_m3min_ex = sum([
+        total_m3min_ex_raw = sum([
             F.flow_to_28inH2O(r["m3min_corr"] / 60.0, r.get("dp_inH2O", 28.0), meas, ref) * 60.0 for r in rows_ex
         ])
+        total_m3min_ex = F.apply_exhaust_pipe_effect(total_m3min_ex_raw, ex_pipe_used, CAL.K_EX_PIPE)
     else:
         total_m3min_in = F.total_m3min(rows_in)
-        total_m3min_ex = F.total_m3min(rows_ex)
+        total_m3min_ex = F.apply_exhaust_pipe_effect(F.total_m3min(rows_ex), ex_pipe_used, CAL.K_EX_PIPE)
     # Convert max_lift_mm to inches for required_ex_int_ratio calibration
     max_lift_in = inputs["max_lift_mm"] / 25.4
     required_ratio = F.required_ex_int_ratio(inputs["cr"], max_lift_in)
@@ -53,22 +60,37 @@ def flowtest_header_metrics_SI(inputs: dict) -> dict:
     if ratio_rows_in and isinstance(ratio_rows_in[0], dict) and "dp_inH2O" in ratio_rows_in[0]:
         meas = F.AirState(101325.0, F.C_to_K(20.0), 0.0)
         ref = meas
-        sel_total_in = sum([
-            F.flow_to_28inH2O(r["m3min_corr"] / 60.0, r.get("dp_inH2O", 28.0), meas, ref) * 60.0 for r in ratio_rows_in
-        ])
-        sel_total_ex = sum([
-            F.flow_to_28inH2O(r["m3min_corr"] / 60.0, r.get("dp_inH2O", 28.0), meas, ref) * 60.0 for r in ratio_rows_ex
-        ])
+        # Per-point corrected flows for ratio calculations
+        corr_in = [F.flow_to_28inH2O(r["m3min_corr"] / 60.0, r.get("dp_inH2O", 28.0), meas, ref) * 60.0 for r in ratio_rows_in]
+        corr_ex_raw = [F.flow_to_28inH2O(r["m3min_corr"] / 60.0, r.get("dp_inH2O", 28.0), meas, ref) * 60.0 for r in ratio_rows_ex]
+        corr_ex = [F.apply_exhaust_pipe_effect(q, ex_pipe_used, CAL.K_EX_PIPE) for q in corr_ex_raw]
+        sel_total_in = sum(corr_in)
+        sel_total_ex = sum(corr_ex)
     else:
-        sel_total_in = F.total_m3min(ratio_rows_in)
-        sel_total_ex = F.total_m3min(ratio_rows_ex)
+        corr_in = [float(r.get("m3min_corr", 0.0)) for r in ratio_rows_in]
+        corr_ex = [F.apply_exhaust_pipe_effect(float(r.get("m3min_corr", 0.0)), ex_pipe_used, CAL.K_EX_PIPE) for r in ratio_rows_ex]
+        sel_total_in = sum(corr_in)
+        sel_total_ex = sum(corr_ex)
     if sel_total_in <= 0:
         existing_ratio = 0.0
     else:
-        if inputs.get("exint_apply_calibration", True):
-            existing_ratio = F.existing_ex_int_ratio(sel_total_ex, sel_total_in, mode="total")
+        # If the caller provided ratio row hints, prefer total-based ratio on that subset to align with report anchors.
+        if inputs.get("rows_for_ratio_in") is not None or inputs.get("rows_for_ratio_ex") is not None:
+            base_ratio = sel_total_ex / sel_total_in
         else:
-            existing_ratio = sel_total_ex / sel_total_in
+            mode = getattr(CAL, "EXINT_RATIO_MODE", "avg")
+            if mode == "avg":
+                # average of per-point ratios
+                ratios = []
+                for qi, qe in zip(corr_in, corr_ex):
+                    ratios.append(qe / qi if qi > 0 else 0.0)
+                base_ratio = sum(ratios) / max(1, len(ratios))
+            else:
+                base_ratio = sel_total_ex / sel_total_in
+        if inputs.get("exint_apply_calibration", True):
+            existing_ratio = min(1.0, base_ratio * F.K_EXINT_RATIO)
+        else:
+            existing_ratio = base_ratio
     return dict(
         area_window_in_mm2=area_window_in_mm2,
         area_window_ex_mm2=area_window_ex_mm2,
@@ -353,7 +375,16 @@ def compute_main_screen_SI(inputs: Dict) -> Dict:
     stroke_mm = float(inputs["stroke_mm"])  # mm
     n_cyl = int(inputs["n_cyl"])  # count
     ve = float(inputs.get("ve", 1.0))
-    n_ports_eff = float(inputs.get("n_ports_eff", n_cyl/2.0))
+    # Derive n_ports_eff optionally from valves/siamesing
+    if "n_ports_eff" in inputs:
+        n_ports_eff = float(inputs["n_ports_eff"])
+    else:
+        niv = int(inputs.get("n_int_valves_per_cyl", 0))
+        siam = bool(inputs.get("siamesed_intake", False))
+        if niv > 0:
+            n_ports_eff = F.n_ports_eff_from_valves(niv, siam)
+        else:
+            n_ports_eff = n_cyl/2.0
     cr = float(inputs.get("cr", 10.5))
 
     v_port_ms = F.port_velocity_from_mach(mach, units="SI")
@@ -404,7 +435,15 @@ def compute_main_screen_US(inputs: Dict) -> Dict:
     stroke_in = float(inputs["stroke_in"])  # in
     n_cyl = int(inputs["n_cyl"])  # count
     ve = float(inputs.get("ve", 1.0))
-    n_ports_eff = float(inputs.get("n_ports_eff", n_cyl/2.0))
+    if "n_ports_eff" in inputs:
+        n_ports_eff = float(inputs["n_ports_eff"])
+    else:
+        niv = int(inputs.get("n_int_valves_per_cyl", 0))
+        siam = bool(inputs.get("siamesed_intake", False))
+        if niv > 0:
+            n_ports_eff = F.n_ports_eff_from_valves(niv, siam)
+        else:
+            n_ports_eff = n_cyl/2.0
     cr = float(inputs.get("cr", 10.5))
 
     Amean_mm2 = F.in2_to_mm2(Amean_in2)

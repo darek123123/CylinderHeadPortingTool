@@ -48,6 +48,11 @@ def cmd_compare(args: argparse.Namespace) -> int:
     dataA = _read_json(args.a)
     dataB = _read_json(args.b)
     out = A.compare_two_tests(dataA, dataB, mode=args.mode, units=args.units)
+    if not args.percent:
+        # Remove percent series for cleaner output when not requested
+        for k in list(out.keys()):
+            if k.endswith("Pct"):
+                out.pop(k, None)
     json.dump(out, sys.stdout, ensure_ascii=False)
     sys.stdout.write("\n")
     return 0
@@ -70,6 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_cmp.add_argument("--b", required=True, help="Path to JSON input file for Test B")
     p_cmp.add_argument("--units", choices=["US","SI"], default="SI")
     p_cmp.add_argument("--mode", choices=["lift","ld"], default="lift")
+    p_cmp.add_argument("--percent", action="store_true", help="Include percent delta series in output")
     p_cmp.set_defaults(func=cmd_compare)
 
     return p

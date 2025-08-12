@@ -27,6 +27,9 @@ from .calibration import (
     RHO_SLUG_FT3, G_FTPS2, RHO_KGM3_STD, G_M_S2,
     K_CFM_TO_HP, K_CSA_HP, K_PORT_DIST, K_CR, K_EXINT_RATIO,
     SHIFT_ALPHA, K_CSA_kW, K_FLOW_kW, K_CR_REF, K_CR_SLOPE,
+    EX_PIPE_ENABLED_DEFAULT, K_EX_PIPE,
+    AIR_STATE_USE_DYNAMIC, AIR_T_C, AIR_P_kPa,
+    REQUIRED_RATIO_STRATEGY,
 )
 
 # =============================
@@ -535,6 +538,10 @@ def mean_port_velocity_from_mach_main(mach: float, units: str = "US") -> float:
         float: mean port velocity [m/s or ft/s]
     Source: calibration from manual, FLOW main screen (fixed a₀)
     """
+    # Optional dynamic a0(T)
+    if AIR_STATE_USE_DYNAMIC:
+        a0_si = a0_from_T_C(AIR_T_C)
+        return mach * (a0_si if units.upper() != "US" else ms_to_fts(a0_si))
     if units.upper() == "US":
         return mach * A0_FT_S
     else:
@@ -549,6 +556,42 @@ def port_velocity_from_mach(mach: float, units: str = "SI") -> float:
     SI: v[m/s] = mach * A0_M_S; US: v[ft/s] = mach * A0_FT_S.
     """
     return mean_port_velocity_from_mach_main(mach, units)
+
+# --- Optional dynamic air-state helpers (ideal gas approximations, opt-in) ---
+def a0_from_T_C(T_C: float) -> float:
+    """Speed of sound a0 [m/s] from temperature in °C (ideal gas)."""
+    return math.sqrt(GAMMA_AIR * R_AIR * (T_C + 273.15))
+
+def rho_from_Tp(T_C: float, p_kPa: float) -> float:
+    """Air density [kg/m^3] from temperature °C and pressure kPa (ideal gas)."""
+    T_K = T_C + 273.15
+    p_Pa = p_kPa * 1000.0
+    return p_Pa / (R_AIR * T_K)
+    # Strategy hook (default linear)
+    if REQUIRED_RATIO_STRATEGY == "linear":
+        # Calibration from manual anchors:
+        # - 0.739 at CR=10.5, MaxLift=0.540 (US report)
+        # - ~0.755 at CR≈9.0, MaxLift≈0.700 (SI report)
+        a = 0.024734  # per CR
+        b = 0.332050  # per inch of max lift
+        c = 0.300000  # baseline
+        return a * cr + b * max_lift_in + c
+    # Fallback to linear
+    a = 0.024734
+    b = 0.332050
+    c = 0.300000
+    return a * cr + b * max_lift_in + c
+
+# --- Exhaust pipe effect helper ---
+def apply_exhaust_pipe_effect(q_ex: float, enabled: bool, k: float) -> float:
+    return q_ex * (k if enabled else 1.0)
+
+# --- Effective ports helper (siamesed) ---
+def n_ports_eff_from_valves(n_int_valves_per_cyl: int, siamesed_intake: bool) -> float:
+    if n_int_valves_per_cyl <= 0:
+        raise ValueError("n_int_valves_per_cyl > 0")
+    factor = 0.5 if siamesed_intake else 1.0
+    return n_int_valves_per_cyl * factor
 
 def piston_area_mm2(bore_mm: float) -> float:
     """Piston area [mm^2] = pi/4 * bore_mm^2."""

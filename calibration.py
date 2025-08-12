@@ -39,11 +39,12 @@ K_PORT_DIST: float = 0.3086
 # (reserved: compression-ratio correction placeholder removed; see SI block below)
 
 # Existing EX/IN ratio GUI tweak: GUI reports slightly higher than raw ratio.
-# Anchor: 84.1/114.5 → 0.745 → factor ≈ 1.0143, capped at 1.0.
+# Anchor-calibrated factor; capped at 1.0.
 K_EXINT_RATIO: float = 1.0143
 
 # Mode for existing EX/IN ratio aggregation (header): "avg" or "total".
-EXINT_RATIO_MODE: str = "avg"
+# Default to totals (matches report header semantics more often).
+EXINT_RATIO_MODE: str = "total"
 
 # --- SI main screen calibration ---
 # Shift RPM = peak_rpm * (1 + SHIFT_ALPHA)
@@ -59,3 +60,17 @@ K_FLOW_kW: float = 21.42
 K_CR: float = 1.1207
 K_CR_REF: float = 10.5
 K_CR_SLOPE: float = 0.0
+
+# --- Exhaust pipe effect (Flow Test) ---
+# When enabled, applies a multiplicative factor to exhaust-side corrected flow only.
+EX_PIPE_ENABLED_DEFAULT: bool = False
+K_EX_PIPE: float = 1.00  # typical 1.03..1.08 when enabled; 1.00 means no effect
+
+# --- Optional dynamic air-state overrides (opt-in) ---
+# When enabled, use ideal-gas a0(T) and rho(T,p) instead of GUI fixed constants for main-screen velocity.
+AIR_STATE_USE_DYNAMIC: bool = False
+AIR_T_C: float = 15.0
+AIR_P_kPa: float = 101.325
+
+# Required ratio strategy (placeholder for future piecewise/CR-Lmax models)
+REQUIRED_RATIO_STRATEGY: str = "linear"
