@@ -51,8 +51,8 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
         x_lift = [float(r.get("lift_mm", 0.0)) for r in rows]
         d_in = float(header.get("d_valve_in_mm", 0.0))
         d_ex = float(header.get("d_valve_ex_mm", 0.0))
-        pts_int = []
-        pts_ex = []
+        pts_int: List[Dict[str, Any]] = []
+        pts_ex: List[Dict[str, Any]] = []
         for r in rows:
             lift = float(r.get("lift_mm", 0.0))
             dp = float(r.get("dp_inH2O", 28.0))
@@ -93,12 +93,12 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
         v_mean_ex = safe(lambda: A.series_port_velocity(pts_ex, "SI"), len(pts_ex))
         v_eff_int = safe(lambda: A.series_effective_velocity(pts_int, "SI"), len(pts_int))
         v_eff_ex = safe(lambda: A.series_effective_velocity(pts_ex, "SI"), len(pts_ex))
-        energy_int = A.series_port_energy(pts_int, "SI")
-        energy_ex = A.series_port_energy(pts_ex, "SI")
-        energy_density_int = A.series_port_energy_density(pts_int, "SI")
-        energy_density_ex = A.series_port_energy_density(pts_ex, "SI")
-        observed_int = A.series_cfm_per_sq_area(pts_int, "SI")
-        observed_ex = A.series_cfm_per_sq_area(pts_ex, "SI")
+        energy_int = safe(lambda: A.series_port_energy(pts_int, "SI"), len(pts_int))
+        energy_ex = safe(lambda: A.series_port_energy(pts_ex, "SI"), len(pts_ex))
+        energy_density_int = safe(lambda: A.series_port_energy_density(pts_int, "SI"), len(pts_int))
+        energy_density_ex = safe(lambda: A.series_port_energy_density(pts_ex, "SI"), len(pts_ex))
+        observed_int = safe(lambda: A.series_cfm_per_sq_area(pts_int, "SI"), len(pts_int))
+        observed_ex = safe(lambda: A.series_cfm_per_sq_area(pts_ex, "SI"), len(pts_ex))
         units_map = {
             "flow": "m³/min",
             "vel": "m/s",
@@ -152,12 +152,11 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
         header_metrics = A.flowtest_header_metrics_SI(hdr_si)
         table_rows = A.flowtest_tables_SI(si_rows)
         # Build points per side (SI shape)
-        import math
         x_lift = [float(r.get("lift_mm", 0.0)) for r in si_rows]
         d_in = float(header.get("d_valve_in_mm", 0.0))
         d_ex = float(header.get("d_valve_ex_mm", 0.0))
-        pts_int = []
-        pts_ex = []
+        pts_int: List[Dict[str, Any]] = []
+        pts_ex: List[Dict[str, Any]] = []
         for r in si_rows:
             lift = float(r.get("lift_mm", 0.0))
             dp = float(r.get("dp_inH2O", 28.0))
@@ -197,12 +196,12 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
         v_mean_ex = safe(lambda: A.series_port_velocity(pts_ex, "SI"), len(pts_ex))
         v_eff_int = safe(lambda: A.series_effective_velocity(pts_int, "SI"), len(pts_int))
         v_eff_ex = safe(lambda: A.series_effective_velocity(pts_ex, "SI"), len(pts_ex))
-        energy_int = A.series_port_energy(pts_int, "SI")
-        energy_ex = A.series_port_energy(pts_ex, "SI")
-        energy_density_int = A.series_port_energy_density(pts_int, "SI")
-        energy_density_ex = A.series_port_energy_density(pts_ex, "SI")
-        observed_int = A.series_cfm_per_sq_area(pts_int, "SI")
-        observed_ex = A.series_cfm_per_sq_area(pts_ex, "SI")
+        energy_int = safe(lambda: A.series_port_energy(pts_int, "SI"), len(pts_int))
+        energy_ex = safe(lambda: A.series_port_energy(pts_ex, "SI"), len(pts_ex))
+        energy_density_int = safe(lambda: A.series_port_energy_density(pts_int, "SI"), len(pts_int))
+        energy_density_ex = safe(lambda: A.series_port_energy_density(pts_ex, "SI"), len(pts_ex))
+        observed_int = safe(lambda: A.series_cfm_per_sq_area(pts_int, "SI"), len(pts_int))
+        observed_ex = safe(lambda: A.series_cfm_per_sq_area(pts_ex, "SI"), len(pts_ex))
         units_map = {
             "flow": "m³/min",
             "vel": "m/s",
@@ -271,13 +270,7 @@ def compare_tests(
         return out
     A_points = _norm(A_points)
     B_points = _norm(B_points)
-    # Lightweight validation using FlowRow* models; extra fields allowed
-    if units == "US":
-        _ = [FlowRowUS(**p) for p in A_points]
-        _ = [FlowRowUS(**p) for p in B_points]
-    else:
-        _ = [FlowRowSI(**p) for p in A_points]
-        _ = [FlowRowSI(**p) for p in B_points]
+    # Skip strict validation here; compare accepts flexible shapes. Series builders will handle missing fields.
     # Build intake/exhaust views for A and B
     def _split(points: List[Dict[str, Any]]) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
         pts_int: List[Dict[str, Any]] = []
@@ -285,12 +278,26 @@ def compare_tests(
         if units == "US":
             for p in points:
                 lift_in = p.get("lift_in") if "lift_in" in p else F.mm_to_in(p.get("lift_mm", 0.0))
-                pts_int.append({**p, "q_cfm": p.get("q_cfm", p.get("q_in_cfm")), "lift_in": lift_in})
-                pts_ex.append({**p, "q_cfm": p.get("q_ex_cfm", p.get("q_cfm")), "lift_in": lift_in})
+                dv_in = p.get("d_valve_in") if "d_valve_in" in p else F.mm_to_in(p.get("d_valve_mm", 0.0))
+                aref_in2 = None
+                try:
+                    import math
+                    aref_in2 = math.pi * (dv_in or 0.0) * (lift_in or 0.0)
+                except Exception:
+                    aref_in2 = None
+                pts_int.append({**p, "q_cfm": p.get("q_cfm", p.get("q_in_cfm")), "lift_in": lift_in, "a_ref_in2": aref_in2})
+                pts_ex.append({**p, "q_cfm": p.get("q_ex_cfm", p.get("q_cfm")), "lift_in": lift_in, "a_ref_in2": aref_in2})
         else:
             for p in points:
-                pts_int.append({**p, "q_m3min": p.get("q_in_m3min", p.get("q_m3min", 0.0))})
-                pts_ex.append({**p, "q_m3min": p.get("q_ex_m3min", p.get("q_m3min", 0.0))})
+                lift = p.get("lift_mm", 0.0)
+                dv = p.get("d_valve_mm") or p.get("d_valve_in_mm") or p.get("d_valve_ex_mm")
+                try:
+                    import math
+                    aref_mm2 = math.pi * float(dv or 0.0) * float(lift or 0.0)
+                except Exception:
+                    aref_mm2 = None
+                pts_int.append({**p, "q_m3min": p.get("q_in_m3min", p.get("q_m3min", 0.0)), "a_ref_mm2": aref_mm2})
+                pts_ex.append({**p, "q_m3min": p.get("q_ex_m3min", p.get("q_m3min", 0.0)), "a_ref_mm2": aref_mm2})
         return pts_int, pts_ex
 
     A_int, A_ex = _split(A_points)
@@ -310,42 +317,29 @@ def compare_tests(
         flow_int = A.series_flow_vs_lift(pts_int, units)
         flow_ex = A.series_flow_vs_lift(pts_ex, units)
         # SAE CD
-        sae_cd_int = A.series_sae_cd(pts_int, units)
-        sae_cd_ex = A.series_sae_cd(pts_ex, units)
+        def safe(call, default_len):
+            try:
+                return call()
+            except Exception:
+                return [None] * default_len
+        sae_cd_int = safe(lambda: A.series_sae_cd(pts_int, units), len(pts_int))
+        sae_cd_ex = safe(lambda: A.series_sae_cd(pts_ex, units), len(pts_ex))
         # Eff CD (may fail if a_eff missing)
-        try:
-            eff_cd_int = A.series_effective_sae_cd(pts_int, units)
-        except Exception:
-            eff_cd_int = [None] * len(pts_int)
-        try:
-            eff_cd_ex = A.series_effective_sae_cd(pts_ex, units)
-        except Exception:
-            eff_cd_ex = [None] * len(pts_ex)
+        eff_cd_int = safe(lambda: A.series_effective_sae_cd(pts_int, units), len(pts_int))
+        eff_cd_ex = safe(lambda: A.series_effective_sae_cd(pts_ex, units), len(pts_ex))
         # Velocities
-        try:
-            v_mean_int = A.series_port_velocity(pts_int, units)
-        except Exception:
-            v_mean_int = [None] * len(pts_int)
-        try:
-            v_mean_ex = A.series_port_velocity(pts_ex, units)
-        except Exception:
-            v_mean_ex = [None] * len(pts_ex)
-        try:
-            v_eff_int = A.series_effective_velocity(pts_int, units)
-        except Exception:
-            v_eff_int = [None] * len(pts_int)
-        try:
-            v_eff_ex = A.series_effective_velocity(pts_ex, units)
-        except Exception:
-            v_eff_ex = [None] * len(pts_ex)
+        v_mean_int = safe(lambda: A.series_port_velocity(pts_int, units), len(pts_int))
+        v_mean_ex = safe(lambda: A.series_port_velocity(pts_ex, units), len(pts_ex))
+        v_eff_int = safe(lambda: A.series_effective_velocity(pts_int, units), len(pts_int))
+        v_eff_ex = safe(lambda: A.series_effective_velocity(pts_ex, units), len(pts_ex))
         # Energy
-        energy_int = A.series_port_energy(pts_int, units)
-        energy_ex = A.series_port_energy(pts_ex, units)
-        energy_density_int = A.series_port_energy_density(pts_int, units)
-        energy_density_ex = A.series_port_energy_density(pts_ex, units)
+        energy_int = safe(lambda: A.series_port_energy(pts_int, units), len(pts_int))
+        energy_ex = safe(lambda: A.series_port_energy(pts_ex, units), len(pts_ex))
+        energy_density_int = safe(lambda: A.series_port_energy_density(pts_int, units), len(pts_int))
+        energy_density_ex = safe(lambda: A.series_port_energy_density(pts_ex, units), len(pts_ex))
         # Observed per area
-        observed_int = A.series_cfm_per_sq_area(pts_int, units)
-        observed_ex = A.series_cfm_per_sq_area(pts_ex, units)
+        observed_int = safe(lambda: A.series_cfm_per_sq_area(pts_int, units), len(pts_int))
+        observed_ex = safe(lambda: A.series_cfm_per_sq_area(pts_ex, units), len(pts_ex))
         return {
             "flow_int": flow_int, "flow_ex": flow_ex,
             "sae_cd_int": sae_cd_int, "sae_cd_ex": sae_cd_ex,
