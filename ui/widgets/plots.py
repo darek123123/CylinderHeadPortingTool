@@ -10,24 +10,34 @@ from ..theme import COLORS
 class Plot(QtCore.QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
+        # Core plot widget
         self.widget = pg.PlotWidget(background=COLORS["bg"])
         self.widget.showGrid(x=True, y=True, alpha=0.3)
         self.widget.getPlotItem().getAxis('left').setPen(COLORS["neutral"])
         self.widget.getPlotItem().getAxis('bottom').setPen(COLORS["neutral"])
         self.legend = self.widget.addLegend()
         pg.setConfigOptions(antialias=True)
-        self._series = {}
+
+        # State
+        self._series: dict[str, pg.PlotDataItem] = {}
+        self._x_unit: str = ""
+        self._y_unit: str = ""
+        self._x_label: str = ""
+        self._y_label: str = ""
+
+        # Crosshair
         self._cross_v = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen(COLORS["grid"]))
         self._cross_h = pg.InfiniteLine(angle=0, movable=False, pen=pg.mkPen(COLORS["grid"]))
         self.widget.addItem(self._cross_v)
         self.widget.addItem(self._cross_h)
+
+        # XY label overlay
         self._xy_label = QtWidgets.QLabel("")
+        self._xy_label.setStyleSheet("color: #B0BEC5; background: transparent;")
         proxy = QtWidgets.QGraphicsProxyWidget()
         proxy.setWidget(self._xy_label)
         self.widget.addItem(proxy)
-        self._xy_label.setStyleSheet("color: #B0BEC5; background: transparent;")
-        self._x_unit = ""
-        self._y_unit = ""
+
         # Mouse move for crosshair
         self.widget.scene().sigMouseMoved.connect(self._on_mouse_moved)
 
@@ -48,6 +58,11 @@ class Plot(QtCore.QObject):
         self.legend = self.widget.addLegend()
         self.widget.addItem(self._cross_v)
         self.widget.addItem(self._cross_h)
+        # Re-apply axis labels after clear
+        if self._x_label or self._x_unit:
+            self.widget.setLabel('bottom', self._x_label)
+        if self._y_label or self._y_unit:
+            self.widget.setLabel('left', self._y_label)
 
     def export_png(self, path: str):
         exporter = ImageExporter(self.widget.plotItem)
@@ -55,13 +70,27 @@ class Plot(QtCore.QObject):
 
     def add_threshold_line(self, y: float, color_token: str, label: str = ""):
         pen = pg.mkPen(COLORS.get(color_token, COLORS["neutral"]))
-        line = pg.InfiniteLine(angle=0, movable=False, pen=pen, label=label, labelOpts={"position":0.95, "color":COLORS.get(color_token, "#fff")})
+        line = pg.InfiniteLine(angle=0, movable=False, pen=pen, label=label, labelOpts={"position": 0.95, "color": COLORS.get(color_token, "#fff")})
         self.widget.addItem(line)
         return line
 
     def set_units(self, x_unit: str = "", y_unit: str = ""):
         self._x_unit = x_unit
         self._y_unit = y_unit
+        # Update existing labels to include units
+        if self._x_label:
+            self.widget.setLabel('bottom', self._x_label)
+        if self._y_label:
+            self.widget.setLabel('left', self._y_label)
+
+    def set_axis_labels(self, x_label: str = "", y_label: str = ""):
+        """Set human-readable axis labels including units. Caller formats units in labels."""
+        self._x_label = x_label
+        self._y_label = y_label
+        if x_label:
+            self.widget.setLabel('bottom', x_label)
+        if y_label:
+            self.widget.setLabel('left', y_label)
 
     def toggle_series(self, name: str):
         item = self._series.get(name)
@@ -77,7 +106,8 @@ class Plot(QtCore.QObject):
     def _on_mouse_moved(self, pos):
         vb = self.widget.plotItem.vb
         mousePoint = vb.mapSceneToView(pos)
-        x = mousePoint.x(); y = mousePoint.y()
+        x = mousePoint.x()
+        y = mousePoint.y()
         self._cross_v.setPos(x)
         self._cross_h.setPos(y)
         xu = f" {self._x_unit}" if self._x_unit else ""
@@ -87,8 +117,8 @@ class Plot(QtCore.QObject):
     def _attach_legend_interaction(self):
         # Install mouse press/double press events on legend items
         for sample, label in getattr(self.legend, 'items', []):
-            item_name = label.text
-            if not hasattr(label, 'mousePressEvent'):
+            item_name = getattr(label, 'text', None)
+            if not item_name or not hasattr(label, 'mousePressEvent'):
                 continue
             def _make_press(name: str):
                 def _press(ev):

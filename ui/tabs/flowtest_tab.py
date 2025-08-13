@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List
-from PySide6 import QtWidgets
+from PySide6 import QtWidgets, QtCore
 
 from ..widgets.inputs import LabeledSpin
 from ..widgets.plots import Plot
@@ -19,43 +19,105 @@ class FlowTestTab(QtWidgets.QWidget):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        layout = QtWidgets.QVBoxLayout(self)
+        root = QtWidgets.QVBoxLayout(self)
 
-        # Top controls
-        top = QtWidgets.QHBoxLayout()
-        self.units = QtWidgets.QComboBox(); self.units.addItems(["SI", "US"])
+        # Top: left inputs + right plot
+        top_widget = QtWidgets.QWidget()
+        top_layout = QtWidgets.QHBoxLayout(top_widget)
+
+        # Left inputs panel
+        left_panel = QtWidgets.QWidget()
+        left_layout = QtWidgets.QVBoxLayout(left_panel)
+        inputs_form = QtWidgets.QFormLayout()
+        self.units = QtWidgets.QComboBox()
+        self.units.addItems(["SI", "US"])
         self.max_lift = LabeledSpin("Max lift", "mm")
         self.cr = LabeledSpin("CR")
         self.d_in = LabeledSpin("Valve In", "mm")
         self.d_ex = LabeledSpin("Valve Ex", "mm")
-        self.calc = QtWidgets.QPushButton("Przelicz"); self.calc.clicked.connect(self.on_compute)
-        self.btn_sample = QtWidgets.QPushButton("Próbka"); self.btn_sample.clicked.connect(self.on_sample_menu)
-        self.btn_import_si = QtWidgets.QPushButton("Import TXT (SI)"); self.btn_import_si.clicked.connect(self.on_import_si)
-        self.btn_import_us = QtWidgets.QPushButton("Import TXT (US)"); self.btn_import_us.clicked.connect(self.on_import_us)
-        for w in [self.units, self.max_lift, self.cr, self.d_in, self.d_ex, self.calc, self.btn_sample, self.btn_import_si, self.btn_import_us]:
-            top.addWidget(w)
+        inputs_form.addRow("Units", self.units)
+        for w in [self.max_lift, self.cr, self.d_in, self.d_ex]:
+            inputs_form.addRow(w)
+        left_layout.addLayout(inputs_form)
 
-        # Table and plot
-        self.table = QtWidgets.QTableView()
+        # Buttons
+        btn_row = QtWidgets.QHBoxLayout()
+        self.calc = QtWidgets.QPushButton("Przelicz")
+        self.calc.clicked.connect(self.on_compute)
+        self.btn_sample = QtWidgets.QPushButton("Próbka")
+        self.btn_sample.clicked.connect(self.on_sample_menu)
+        self.btn_import_si = QtWidgets.QPushButton("Import TXT (SI)")
+        self.btn_import_si.clicked.connect(self.on_import_si)
+        self.btn_import_us = QtWidgets.QPushButton("Import TXT (US)")
+        self.btn_import_us.clicked.connect(self.on_import_us)
+        for w in [self.calc, self.btn_sample, self.btn_import_si, self.btn_import_us]:
+            btn_row.addWidget(w)
+        left_layout.addLayout(btn_row)
+
+        # Collapsible Geometry group
+        self.grp_geom = QtWidgets.QGroupBox("Geometry")
+        self.grp_geom.setCheckable(True)
+        self.grp_geom.setChecked(False)
+        geom_form = QtWidgets.QFormLayout()
+        self.in_w = LabeledSpin("In width", "mm")
+        self.in_h = LabeledSpin("In height", "mm")
+        self.in_rtop = LabeledSpin("In r top", "mm")
+        self.in_rbot = LabeledSpin("In r bot", "mm")
+        self.ex_w = LabeledSpin("Ex width", "mm")
+        self.ex_h = LabeledSpin("Ex height", "mm")
+        self.ex_rtop = LabeledSpin("Ex r top", "mm")
+        self.ex_rbot = LabeledSpin("Ex r bot", "mm")
+        self.seat_ai = LabeledSpin("Seat angle In", "deg")
+        self.seat_ae = LabeledSpin("Seat angle Ex", "deg")
+        self.seat_wi = LabeledSpin("Seat width In", "mm")
+        self.seat_we = LabeledSpin("Seat width Ex", "mm")
+        for w in [self.in_w, self.in_h, self.in_rtop, self.in_rbot, self.ex_w, self.ex_h, self.ex_rtop, self.ex_rbot, self.seat_ai, self.seat_ae, self.seat_wi, self.seat_we]:
+            geom_form.addRow(w)
+        self.grp_geom.setLayout(geom_form)
+        left_layout.addWidget(self.grp_geom)
+
+        # Right: plot and controls
+        right_panel = QtWidgets.QWidget()
+        right_layout = QtWidgets.QVBoxLayout(right_panel)
         self.plot = Plot()
-
-        # Controls below plot
+        right_layout.addWidget(self.plot.widget)
         controls = QtWidgets.QHBoxLayout()
-        self.axis = QtWidgets.QComboBox(); self.axis.addItems(["lift", "ld"])  # x-axis
-        self.metric = QtWidgets.QComboBox(); self.metric.addItems([
+        self.axis = QtWidgets.QComboBox()
+        self.axis.addItems(["lift", "ld"])  # x-axis
+        self.metric = QtWidgets.QComboBox()
+        self.metric.addItems([
             "Flow", "SAE CD", "Eff SAE CD", "Mean Vel", "Eff Vel", "Energy", "Energy Density", "Observed per area"
         ])
-        self.chk_in = QtWidgets.QCheckBox("Intake"); self.chk_in.setChecked(True)
-        self.chk_ex = QtWidgets.QCheckBox("Exhaust"); self.chk_ex.setChecked(True)
-        self.btn_export_png = QtWidgets.QPushButton("Export PNG"); self.btn_export_png.clicked.connect(self.on_export_png)
+        self.chk_in = QtWidgets.QCheckBox("Intake")
+        self.chk_in.setChecked(True)
+        self.chk_ex = QtWidgets.QCheckBox("Exhaust")
+        self.chk_ex.setChecked(True)
+        self.btn_export_png = QtWidgets.QPushButton("Export PNG")
+        self.btn_export_png.clicked.connect(self.on_export_png)
         for w in [QtWidgets.QLabel("Axis:"), self.axis, QtWidgets.QLabel("Metric:"), self.metric, self.chk_in, self.chk_ex, self.btn_export_png]:
             controls.addWidget(w)
+        right_layout.addLayout(controls)
 
-        # Assemble
-        layout.addLayout(top)
-        layout.addWidget(self.table)
-        layout.addWidget(self.plot.widget)
-        layout.addLayout(controls)
+        # Assemble top
+        top_layout.addWidget(left_panel, 0)
+        top_layout.addWidget(right_panel, 1)
+
+        # Bottom: tabs with Rows and Header tables
+        bottom_tabs = QtWidgets.QTabWidget()
+        self.table_rows = QtWidgets.QTableView()
+        self.table_header = QtWidgets.QTableView()
+        # Back-compat for tests expecting a single 'table' attribute
+        self.table = self.table_rows
+        bottom_tabs.addTab(self.table_rows, "Rows")
+        bottom_tabs.addTab(self.table_header, "Header")
+
+        splitter_top_bottom = QtWidgets.QSplitter(QtCore.Qt.Vertical)
+        splitter_top_bottom.addWidget(top_widget)
+        splitter_top_bottom.addWidget(bottom_tabs)
+        splitter_top_bottom.setStretchFactor(0, 3)
+        splitter_top_bottom.setStretchFactor(1, 1)
+
+        root.addWidget(splitter_top_bottom)
 
         # cache
         self._last_series = {}
@@ -68,6 +130,8 @@ class FlowTestTab(QtWidgets.QWidget):
         menu = QtWidgets.QMenu(self)
         act = menu.addAction('E7TE (SI, 28")')
         act.triggered.connect(self._apply_e7te_si)
+        act2 = menu.addAction('SI – szybka próbka (28")')
+        act2.triggered.connect(self._apply_quick_si)
         menu.exec(self.mapToGlobal(self.rect().bottomLeft()))
 
     def _apply_e7te_si(self) -> None:
@@ -141,6 +205,26 @@ class FlowTestTab(QtWidgets.QWidget):
         self.units.setCurrentText("SI")
         self._render("SI", header, rows)
 
+    def _apply_quick_si(self) -> None:
+        # 10 rows: lift 1.5–12 mm step 1 mm, dp 28, minimal header
+        header: Dict[str, Any] = {
+            "units": "SI",
+            "cr": 10.0,
+            "max_lift_mm": 12.0,
+            "d_valve_in_mm": 45.0,
+            "d_valve_ex_mm": 38.0,
+            "in_width_mm": 30.0, "in_height_mm": 50.0, "in_r_top_mm": 8.0, "in_r_bot_mm": 8.0,
+            "ex_width_mm": 28.0, "ex_height_mm": 40.0, "ex_r_top_mm": 6.0, "ex_r_bot_mm": 6.0,
+            "rows_in": [], "rows_ex": [],
+        }
+        rows: List[Dict[str, Any]] = []
+        lift = 1.5
+        while lift <= 12.0 + 1e-9:
+            rows.append({"lift_mm": round(lift, 3), "q_in_m3min": 0.1 * lift, "q_ex_m3min": 0.09 * lift, "dp_inH2O": 28.0})
+            lift += 1.0
+        self.units.setCurrentText("SI")
+        self._render("SI", header, rows)
+
     def on_compute(self) -> None:
         units = self.units.currentText()
         header = {
@@ -199,10 +283,15 @@ class FlowTestTab(QtWidgets.QWidget):
         self._last_rows = rows
         self._last_units = units
         self._last_units_map = data.get("units", {}) or {}
-        # Table
+        # Tables: rows and header
         table_rows = [[r.get("lift_mm"), r.get("q_in_m3min"), r.get("q_ex_m3min")] for r in rows]
-        model = SimpleTableModel(["Lift", "Q_in", "Q_ex"], table_rows)
-        self.table.setModel(model)
+        model_rows = SimpleTableModel(["Lift [mm]", "Q_in", "Q_ex"], table_rows)
+        self.table_rows.setModel(model_rows)
+        # Header metrics table (flat key/value for visibility)
+        hdr = data.get("header", {}) or {}
+        hdr_items = [[k, hdr[k]] for k in hdr.keys()]
+        model_hdr = SimpleTableModel(["Key", "Value"], hdr_items)
+        self.table_header.setModel(model_hdr)
         # Plot
         self._update_plot_from_series()
         if not self._signals_connected:
@@ -220,10 +309,12 @@ class FlowTestTab(QtWidgets.QWidget):
         if self.axis.currentText() == "lift":
             x_int = x_ex = self._last_x.get("lift_mm", [])
             self.plot.set_units("mm", self._y_unit_for_metric())
+            self.plot.set_axis_labels("Lift [mm]", f"{self._y_unit_for_metric()}")
         else:
             x_int = self._last_x.get("ld_int", [])
             x_ex = self._last_x.get("ld_ex", [])
             self.plot.set_units("L/D", self._y_unit_for_metric())
+            self.plot.set_axis_labels("L/D [-]", f"{self._y_unit_for_metric()}")
         # Metric mapping to series keys
         metric_name = self.metric.currentText()
         key_map = {

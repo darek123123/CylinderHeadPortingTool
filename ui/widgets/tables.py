@@ -54,12 +54,21 @@ class SimpleTableModel(QtCore.QAbstractTableModel):
             # Percent delta thresholds (color by sign, threshold by magnitude)
             if col in self.percent_cols:
                 mag = abs(val)
-                if mag >= THRESHOLDS["percent_crit"]:
-                    base = QtGui.QColor(COLORS["percent_pos"] if val >= 0 else COLORS["percent_neg"])
-                    return base.lighter(170)
-                if mag >= THRESHOLDS["percent_warn"]:
-                    base = QtGui.QColor(COLORS["percent_pos"] if val >= 0 else COLORS["percent_neg"])
-                    return base.lighter(200)
+                # Prefer new fractional thresholds if values seem fractional (-1..+1), else fall back to legacy % points
+                if mag <= 1.0:
+                    if mag >= THRESHOLDS.get("pct_crit", 0.10):
+                        base = QtGui.QColor(COLORS["percent_pos"] if val >= 0 else COLORS["percent_neg"])
+                        return base.lighter(170)
+                    if mag >= THRESHOLDS.get("pct_warn", 0.05):
+                        base = QtGui.QColor(COLORS["percent_pos"] if val >= 0 else COLORS["percent_neg"])
+                        return base.lighter(200)
+                else:
+                    if mag >= THRESHOLDS["percent_crit"]:
+                        base = QtGui.QColor(COLORS["percent_pos"] if val >= 0 else COLORS["percent_neg"])
+                        return base.lighter(170)
+                    if mag >= THRESHOLDS["percent_warn"]:
+                        base = QtGui.QColor(COLORS["percent_pos"] if val >= 0 else COLORS["percent_neg"])
+                        return base.lighter(200)
         return None
 
     def headerData(self, section, orientation, role=QtCore.Qt.DisplayRole):

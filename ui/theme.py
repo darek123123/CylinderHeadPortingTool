@@ -18,5 +18,10 @@ THRESHOLDS = {
   "mach_intake_warn": 0.60, "mach_intake_crit": 0.70,
   "vel_mean_warn_ms": 90.0, "vel_mean_crit_ms": 110.0,
   "vel_eff_warn_ms": 120.0, "vel_eff_crit_ms": 140.0,
+  # Legacy percent thresholds (values in percentage points) used in older tables
   "percent_warn": 5.0,      "percent_crit": 10.0,
+  # New fractional thresholds for %Δ coloring (magnitude as fraction of 1.0)
+  "pct_neutral": 0.02,      # 2%
+  "pct_warn": 0.05,         # 5%
+  "pct_crit": 0.10,         # 10%
 }
