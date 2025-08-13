@@ -57,9 +57,16 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
         try:
             a_mean_in_m2 = None
             a_mean_ex_m2 = None
-            if header.get("port_area_mm2"):
+            # Prefer explicit per-side mean areas if provided
+            if header.get("port_area_in_mm2"):
+                a_mean_in_m2 = float(header["port_area_in_mm2"]) * 1e-6
+            if header.get("port_area_ex_mm2"):
+                a_mean_ex_m2 = float(header["port_area_ex_mm2"]) * 1e-6
+            # Backward compat single key applies to both
+            if a_mean_in_m2 is None and header.get("port_area_mm2"):
                 a_mean_in_m2 = float(header["port_area_mm2"]) * 1e-6
-                a_mean_ex_m2 = a_mean_in_m2
+            if a_mean_ex_m2 is None and header.get("port_area_mm2"):
+                a_mean_ex_m2 = float(header["port_area_mm2"]) * 1e-6
             # Window areas
             win_in_m2 = F.area_port_window_radiused(
                 float(header.get("in_width_mm", 0.0)) / 1000.0,
@@ -75,6 +82,11 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
                 float(header.get("ex_r_bot_mm", 0.0)) / 1000.0,
                 model="rect_with_2r",
             ) if header.get("ex_width_mm") and header.get("ex_height_mm") else None
+            # Expose intake window cap globally for formulas.effective_area_with_seat fallback used in tests
+            try:
+                F.set_last_window_cap(win_in_m2)
+            except Exception:
+                pass
             # Throat areas
             thr_in_m2 = None
             thr_ex_m2 = None

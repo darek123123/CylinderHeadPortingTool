@@ -18,9 +18,11 @@ def flowtest_header_metrics_SI(inputs: dict) -> dict:
     # All units mm or mm^2.
     # Port window area (rect_with_2r model)
     area_window_in_mm2 = F.area_port_window_radiused(
-        inputs["in_width_mm"], inputs["in_height_mm"], inputs["in_r_top_mm"], inputs["in_r_bot_mm"], model="rect_with_2r") * 1e6
+        inputs["in_width_mm"] / 1000.0, inputs["in_height_mm"] / 1000.0,
+        inputs["in_r_top_mm"] / 1000.0, inputs["in_r_bot_mm"] / 1000.0, model="rect_with_2r") * 1e6
     area_window_ex_mm2 = F.area_port_window_radiused(
-        inputs["ex_width_mm"], inputs["ex_height_mm"], inputs["ex_r_top_mm"], inputs["ex_r_bot_mm"], model="rect_with_2r") * 1e6
+        inputs["ex_width_mm"] / 1000.0, inputs["ex_height_mm"] / 1000.0,
+        inputs["ex_r_top_mm"] / 1000.0, inputs["ex_r_bot_mm"] / 1000.0, model="rect_with_2r") * 1e6
     valve_area_in_mm2 = F.piston_area_mm2(inputs["d_valve_in_mm"])
     valve_area_ex_mm2 = F.piston_area_mm2(inputs["d_valve_ex_mm"])
     area_ratio_in = F.area_ratio(area_window_in_mm2, valve_area_in_mm2)
