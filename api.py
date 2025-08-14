@@ -53,9 +53,9 @@ def flowtest_compute(units: Units, header: Dict[str, Any], rows: List[Dict[str, 
     """
     try:
         return _flowtest_compute_impl(units, header, rows)
-    except Exception as e:
+    except Exception:
         logging.getLogger(__name__).exception("flowtest_compute failed")
-        raise BackendError(str(e))
+        raise
 
 def _units_map(units: Units) -> Dict[str, str]:
     return {

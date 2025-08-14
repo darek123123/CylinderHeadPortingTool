@@ -28,26 +28,33 @@ class Plot(QtCore.QObject):
         # Crosshair
         self._cross_v = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen(COLORS["grid"]))
         self._cross_h = pg.InfiniteLine(angle=0, movable=False, pen=pg.mkPen(COLORS["grid"]))
-        self.widget.addItem(self._cross_v)
-        self.widget.addItem(self._cross_h)
+        self._cross_v.setZValue(10)
+        self._cross_h.setZValue(10)
+        self.widget.addItem(self._cross_v, ignoreBounds=True)
+        self.widget.addItem(self._cross_h, ignoreBounds=True)
 
-        # XY label overlay (use pg.TextItem to avoid QGraphics transform warnings)
+        # XY label overlay
         self._xy_text = pg.TextItem("", color=COLORS["neutral"])  # type: ignore[arg-type]
-        self._xy_text.setZValue(1000)  # keep on top
-        self._xy_text.setAnchor((0, 1))  # bottom-left anchor at position
+        self._xy_text.setZValue(1000)
+        self._xy_text.setAnchor((0, 1))
         self.widget.addItem(self._xy_text, ignoreBounds=True)
 
         # Mouse move for crosshair (rate-limited)
         self._mouse_proxy = pg.SignalProxy(self.widget.scene().sigMouseMoved, rateLimit=60, slot=self._on_mouse_moved_evt)
 
         # Extra markers storage
-        self._markers = []
+        self._markers: List[pg.InfiniteLine] = []
 
     def add_series(self, name: str, x: List[float], y: List[float], color_token: str, line_width: int = 2, symbol: Optional[str] = None):
         pen = pg.mkPen(COLORS.get(color_token, COLORS["neutral"]), width=line_width)
         item = self.widget.plot(x, y, name=name, pen=pen, symbol=symbol)
         self._series[name] = item
         self._attach_legend_interaction()
+        # One-shot autorange
+        try:
+            self.widget.enableAutoRange('xy', True)
+        except Exception:
+            pass
         return item
 
     def update_series(self, name: str, x: List[float], y: List[float]):
@@ -58,12 +65,14 @@ class Plot(QtCore.QObject):
         self.widget.clear()
         self._series.clear()
         self.legend = self.widget.addLegend()
-        self.widget.addItem(self._cross_v)
-        self.widget.addItem(self._cross_h)
-        # Re-add XY overlay after clearing the scene
+        # Re-add overlays with ignoreBounds
+        self._cross_v.setZValue(10)
+        self._cross_h.setZValue(10)
+        self.widget.addItem(self._cross_v, ignoreBounds=True)
+        self.widget.addItem(self._cross_h, ignoreBounds=True)
         self.widget.addItem(self._xy_text, ignoreBounds=True)
         self._markers.clear()
-        # Re-apply axis labels after clear
+        # Re-apply axis labels
         if self._x_label or self._x_unit:
             self.widget.setLabel('bottom', self._x_label)
         if self._y_label or self._y_unit:
@@ -136,7 +145,11 @@ class Plot(QtCore.QObject):
         xu = f" {self._x_unit}" if self._x_unit else ""
         yu = f" {self._y_unit}" if self._y_unit else ""
         self._xy_text.setText(f"x={x:.3f}{xu}, y={y:.3f}{yu}")
-        self._xy_text.setPos(x, y)
+        try:
+            (x0, x1), (y0, y1) = vb.viewRange()
+            self._xy_text.setPos(x0, y1)
+        except Exception:
+            self._xy_text.setPos(x, y)
 
     def _on_mouse_moved_evt(self, args):
         pos = args[0] if isinstance(args, (list, tuple)) and args else args

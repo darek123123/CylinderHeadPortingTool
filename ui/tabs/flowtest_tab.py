@@ -21,7 +21,7 @@ class FlowTestTab(QtWidgets.QWidget):
     def _build_ui(self) -> None:
         root = QtWidgets.QVBoxLayout(self)
 
-        # Top: left inputs + right plot
+        # Top: left inputs + right plot (wrapped in a horizontal splitter)
         top_widget = QtWidgets.QWidget()
         top_layout = QtWidgets.QHBoxLayout(top_widget)
 
@@ -104,9 +104,16 @@ class FlowTestTab(QtWidgets.QWidget):
             controls.addWidget(w)
         right_layout.addLayout(controls)
 
-        # Assemble top
-        top_layout.addWidget(left_panel, 0)
-        top_layout.addWidget(right_panel, 1)
+        # Assemble top with scrollable left panel inside a splitter
+        left_scroll = QtWidgets.QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setWidget(left_panel)
+        splitter_lr = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        splitter_lr.addWidget(left_scroll)
+        splitter_lr.addWidget(right_panel)
+        splitter_lr.setStretchFactor(0, 0)
+        splitter_lr.setStretchFactor(1, 1)
+        top_layout.addWidget(splitter_lr)
 
         # Bottom: tabs with Rows and Header tables
         bottom_tabs = QtWidgets.QTabWidget()
@@ -272,12 +279,17 @@ class FlowTestTab(QtWidgets.QWidget):
             "rows_in": [],
             "rows_ex": [],
         }
-        # Minimal synthetic rows with 28" to drive computations
-        rows: List[Dict[str, Any]] = [
-            {"lift_mm": 0.25 * float(self.max_lift.value()), "q_in_m3min": 0.1, "q_ex_m3min": 0.08, "dp_inH2O": 28.0},
-            {"lift_mm": 0.50 * float(self.max_lift.value()), "q_in_m3min": 0.2, "q_ex_m3min": 0.16, "dp_inH2O": 28.0},
-            {"lift_mm": 1.00 * float(self.max_lift.value()), "q_in_m3min": 0.3, "q_ex_m3min": 0.24, "dp_inH2O": 28.0},
-        ]
+        # Collect rows from table; minimal fallback without hard-coded flows
+        rows = self._collect_rows_from_table(units)
+        if not rows:
+            ml = float(self.max_lift.value())
+            if units == "US":
+                from ...formulas import mm_to_in
+                lifts = [0.25 * ml, 0.5 * ml, ml]
+                rows = [{"lift_in": mm_to_in(v), "q_cfm": 0.0, "q_ex_cfm": 0.0, "dp_inH2O": 28.0} for v in lifts]
+            else:
+                lifts = [0.25 * ml, 0.5 * ml, ml]
+                rows = [{"lift_mm": v, "q_in_m3min": 0.0, "q_ex_m3min": 0.0, "dp_inH2O": 28.0} for v in lifts]
         try:
             self._render(units, header, rows)
         except Exception as e:
@@ -438,6 +450,11 @@ class FlowTestTab(QtWidgets.QWidget):
             else:
                 self.plot.add_threshold_line(THRESHOLDS["vel_eff_warn_ms"], "warn", "warn")
                 self.plot.add_threshold_line(THRESHOLDS["vel_eff_crit_ms"], "crit", "crit")
+        # One-shot autorange after plotting
+        try:
+            self.plot.widget.enableAutoRange('xy', True)
+        except Exception:
+            pass
 
     def _y_unit_for_metric(self) -> str:
         m = self.metric.currentText() if hasattr(self, "metric") else "Flow"
@@ -455,3 +472,57 @@ class FlowTestTab(QtWidgets.QWidget):
         if m == "Observed per area":
             return units_map.get("observed_per_area", "")
         return ""
+
+    def _collect_rows_from_table(self, units: str) -> List[Dict[str, Any]]:
+        model = self.table_rows.model()
+        if not isinstance(model, SimpleTableModel) or model.rowCount() == 0:
+            return []
+        headers = [h.lower() for h in (model.headers or [])]
+        def _find(col_keys: List[str]) -> int:
+            for i, h in enumerate(headers):
+                for k in col_keys:
+                    if k in h:
+                        return i
+            return -1
+        i_lift = _find(["lift"])  # matches "Lift [mm]" or "Lift [in]"
+        if units == "US":
+            i_qi = _find(["q_in", "q cfm", "q_in_cfm"])  # intake
+            i_qe = _find(["q_ex", "q_ex_cfm"])  # exhaust
+            i_dp = _find(["dp", "inh2o"])  # optional
+        else:
+            i_qi = _find(["q_in", "m³/min", "m3/min", "q_in_m3min"])  # intake
+            i_qe = _find(["q_ex", "m³/min", "m3/min", "q_ex_m3min"])  # exhaust
+            i_dp = _find(["dp", "inh2o"])  # optional
+        out: List[Dict[str, Any]] = []
+        for r in range(model.rowCount()):
+            row = model.rows[r]
+            def _get(idx: int) -> float:
+                if idx < 0 or idx >= len(row):
+                    return 0.0
+                try:
+                    return float(row[idx]) if row[idx] is not None else 0.0
+                except Exception:
+                    try:
+                        return float(str(row[idx]).replace(",", "."))
+                    except Exception:
+                        return 0.0
+            if units == "US":
+                out.append({
+                    "lift_in": _get(i_lift),
+                    "q_cfm": _get(i_qi),
+                    "q_ex_cfm": _get(i_qe) if i_qe >= 0 else _get(i_qi),
+                    "dp_inH2O": _get(i_dp) if i_dp >= 0 else 28.0,
+                })
+            else:
+                out.append({
+                    "lift_mm": _get(i_lift),
+                    "q_in_m3min": _get(i_qi),
+                    "q_ex_m3min": _get(i_qe) if i_qe >= 0 else 0.0,
+                    "dp_inH2O": _get(i_dp) if i_dp >= 0 else 28.0,
+                })
+        # Filter out rows with non-positive lift
+        if units == "US":
+            out = [r for r in out if r.get("lift_in", 0.0) > 0]
+        else:
+            out = [r for r in out if r.get("lift_mm", 0.0) > 0]
+        return out
