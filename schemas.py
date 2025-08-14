@@ -94,12 +94,12 @@ class FlowRowUS(BaseModel):
 class FlowHeaderInputsUS(BaseModel):
     model_config = ConfigDict(extra="allow")
     # geometric fields in mm (as our SI packers expect); keep symmetry for now
-    in_width_mm: Positive = 0.0  # if not used, can be 0 in US fixtures
-    in_height_mm: Positive = 0.0
+    in_width_mm: NonNegative = 0.0  # allow 0 in US fixtures
+    in_height_mm: NonNegative = 0.0
     in_r_top_mm: NonNegative = 0.0
     in_r_bot_mm: NonNegative = 0.0
-    ex_width_mm: Positive = 0.0
-    ex_height_mm: Positive = 0.0
+    ex_width_mm: NonNegative = 0.0
+    ex_height_mm: NonNegative = 0.0
     ex_r_top_mm: NonNegative = 0.0
     ex_r_bot_mm: NonNegative = 0.0
     d_valve_in_mm: Positive = 0.0

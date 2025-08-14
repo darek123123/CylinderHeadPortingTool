@@ -11,8 +11,11 @@ import math
 
 
 def _norm_number(s: str) -> float:
-    s = s.strip().replace("\u00A0", "").replace(" ", "").replace(",", ".")
-    return float(s)
+    s_clean = s.strip().replace("\u00A0", "").replace(" ", "").replace(",", ".")
+    try:
+        return float(s_clean)
+    except ValueError as e:
+        raise ValueError(f"Invalid numeric value: '{s}'") from e
 
 
 def _parse_kv(lines: List[str]) -> Dict[str, float]:
@@ -31,7 +34,8 @@ def parse_iop_report_si(text: str) -> Dict[str, Any]:
     flow_idx = lines.index("[FLOWTEST]") if "[FLOWTEST]" in lines else -1
     rows_idx = lines.index("[ROWS]") if "[ROWS]" in lines else -1
     if main_idx == -1 or flow_idx == -1 or rows_idx == -1:
-        raise ValueError("Invalid SI report fixture: missing [MAIN]/[FLOWTEST]/[ROWS]")
+        missing = [name for name, idx in (('MAIN', main_idx), ('FLOWTEST', flow_idx), ('ROWS', rows_idx)) if idx == -1]
+        raise ValueError(f"Invalid SI report fixture: missing sections {missing}")
     main_block = [ln for ln in lines[main_idx + 1 : flow_idx] if ln]
     flow_block = [ln for ln in lines[flow_idx + 1 : rows_idx] if ln]
     rows_block = [ln for ln in lines[rows_idx + 1 :] if ln]
@@ -74,7 +78,7 @@ def parse_iop_report_si(text: str) -> Dict[str, Any]:
             continue
         parts = [p.strip() for p in ln.split(";")]
         if len(parts) < 4:
-            continue
+            raise ValueError(f"Malformed SI row (need at least 4 columns): '{ln}'")
         lift_mm = _norm_number(parts[0])
         q_in_m3min = _norm_number(parts[1])
         q_ex_m3min = _norm_number(parts[2])
@@ -120,7 +124,8 @@ def parse_iop_report_us(text: str) -> Dict[str, Any]:
     flow_idx = lines.index("[FLOWTEST]") if "[FLOWTEST]" in lines else -1
     rows_idx = lines.index("[ROWS]") if "[ROWS]" in lines else -1
     if main_idx == -1 or flow_idx == -1 or rows_idx == -1:
-        raise ValueError("Invalid US report fixture: missing sections")
+        missing = [name for name, idx in (('MAIN', main_idx), ('FLOWTEST', flow_idx), ('ROWS', rows_idx)) if idx == -1]
+        raise ValueError(f"Invalid US report fixture: missing sections {missing}")
     main_block = [ln for ln in lines[main_idx + 1 : flow_idx] if ln]
     flow_block = [ln for ln in lines[flow_idx + 1 : rows_idx] if ln]
     rows_block = [ln for ln in lines[rows_idx + 1 :] if ln]
@@ -158,20 +163,20 @@ def parse_iop_report_us(text: str) -> Dict[str, Any]:
             continue
         parts = [p.strip() for p in ln.split(";")]
         if len(parts) < 4:
-            continue
-        lift_in = float(parts[0])
-        q_in_cfm = float(parts[1])
-        q_ex_cfm = float(parts[2])
-        dp_inH2O = float(parts[3])
+            raise ValueError(f"Malformed US row (need at least 4 columns): '{ln}'")
+        lift_in = _norm_number(parts[0])
+        q_in_cfm = _norm_number(parts[1])
+        q_ex_cfm = _norm_number(parts[2])
+        dp_inH2O = _norm_number(parts[3])
         row = {
             "lift_in": lift_in,
             "q_cfm": q_in_cfm,
             "dp_inH2O": dp_inH2O,
         }
         if len(parts) >= 5 and parts[4]:
-            row["a_mean_in2"] = float(parts[4])
+            row["a_mean_in2"] = _norm_number(parts[4])
         if len(parts) >= 6 and parts[5]:
-            row["a_eff_in2"] = float(parts[5])
+            row["a_eff_in2"] = _norm_number(parts[5])
         rows.append(row)
         flow_header["rows_in"].append({"m3min_corr": q_in_cfm * 0.028316846592})
         flow_header["rows_ex"].append({"m3min_corr": q_ex_cfm * 0.028316846592})

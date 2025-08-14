@@ -44,13 +44,15 @@ class FlowTestTab(QtWidgets.QWidget):
         btn_row = QtWidgets.QHBoxLayout()
         self.calc = QtWidgets.QPushButton("Przelicz")
         self.calc.clicked.connect(self.on_compute)
+        self.btn_export_hdr = QtWidgets.QPushButton("Export header metrics")
+        self.btn_export_hdr.clicked.connect(self.on_export_header_metrics)
         self.btn_sample = QtWidgets.QPushButton("Próbka")
         self.btn_sample.clicked.connect(self.on_sample_menu)
         self.btn_import_si = QtWidgets.QPushButton("Import TXT (SI)")
         self.btn_import_si.clicked.connect(self.on_import_si)
         self.btn_import_us = QtWidgets.QPushButton("Import TXT (US)")
         self.btn_import_us.clicked.connect(self.on_import_us)
-        for w in [self.calc, self.btn_sample, self.btn_import_si, self.btn_import_us]:
+        for w in [self.calc, self.btn_export_hdr, self.btn_sample, self.btn_import_si, self.btn_import_us]:
             btn_row.addWidget(w)
         left_layout.addLayout(btn_row)
 
@@ -227,21 +229,79 @@ class FlowTestTab(QtWidgets.QWidget):
 
     def on_compute(self) -> None:
         units = self.units.currentText()
+        # Basic validation for required fields (>0)
+        required_fields = [
+            ("Max lift", float(self.max_lift.value())),
+            ("CR", float(self.cr.value())),
+            ("Valve In", float(self.d_in.value())),
+            ("Valve Ex", float(self.d_ex.value())),
+            ("In width", float(self.in_w.value())),
+            ("In height", float(self.in_h.value())),
+            ("Ex width", float(self.ex_w.value())),
+            ("Ex height", float(self.ex_h.value())),
+        ]
+        bad = [name for name, v in required_fields if v <= 0]
+        if bad:
+            QtWidgets.QMessageBox.critical(self, "Validation error", f"Fields must be > 0: {', '.join(bad)}")
+            return
         header = {
             "max_lift_mm": float(self.max_lift.value()),
             "cr": float(self.cr.value()),
             "d_valve_in_mm": float(self.d_in.value()),
             "d_valve_ex_mm": float(self.d_ex.value()),
-            "in_width_mm": 1.0, "in_height_mm": 1.0, "in_r_top_mm": 0.0, "in_r_bot_mm": 0.0,
-            "ex_width_mm": 1.0, "ex_height_mm": 1.0, "ex_r_top_mm": 0.0, "ex_r_bot_mm": 0.0,
-            "rows_in": [], "rows_ex": [],
+            # Geometry (do not override user input)
+            "in_width_mm": float(self.in_w.value()),
+            "in_height_mm": float(self.in_h.value()),
+            "in_r_top_mm": float(self.in_rtop.value()),
+            "in_r_bot_mm": float(self.in_rbot.value()),
+            "ex_width_mm": float(self.ex_w.value()),
+            "ex_height_mm": float(self.ex_h.value()),
+            "ex_r_top_mm": float(self.ex_rtop.value()),
+            "ex_r_bot_mm": float(self.ex_rbot.value()),
+            # Optional seats (include if provided)
+            **({"seat_angle_in_deg": float(self.seat_ai.value())} if self.seat_ai.value() > 0 else {}),
+            **({"seat_angle_ex_deg": float(self.seat_ae.value())} if self.seat_ae.value() > 0 else {}),
+            **({"seat_width_in_mm": float(self.seat_wi.value())} if self.seat_wi.value() > 0 else {}),
+            **({"seat_width_ex_mm": float(self.seat_we.value())} if self.seat_we.value() > 0 else {}),
+            # Header metrics helpers
+            "rows_in": [],
+            "rows_ex": [],
         }
-        rows = [
-            {"lift_mm": 2.0, "q_in_m3min": 0.2, "q_ex_m3min": 0.18, "dp_inH2O": 28.0},
-            {"lift_mm": 6.0, "q_in_m3min": 0.5, "q_ex_m3min": 0.45, "dp_inH2O": 28.0},
-            {"lift_mm": 10.0, "q_in_m3min": 0.8, "q_ex_m3min": 0.7, "dp_inH2O": 28.0},
+        # Minimal synthetic rows with 28" to drive computations
+        rows: List[Dict[str, Any]] = [
+            {"lift_mm": 0.25 * float(self.max_lift.value()), "q_in_m3min": 0.1, "q_ex_m3min": 0.08, "dp_inH2O": 28.0},
+            {"lift_mm": 0.50 * float(self.max_lift.value()), "q_in_m3min": 0.2, "q_ex_m3min": 0.16, "dp_inH2O": 28.0},
+            {"lift_mm": 1.00 * float(self.max_lift.value()), "q_in_m3min": 0.3, "q_ex_m3min": 0.24, "dp_inH2O": 28.0},
         ]
-        self._render(units, header, rows)
+        try:
+            self._render(units, header, rows)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Compute error", str(e))
+
+    def on_export_header_metrics(self) -> None:
+        try:
+            if not self._last_units or not hasattr(self, "_last_series"):
+                QtWidgets.QMessageBox.information(self, "Export", "No data to export. Compute first.")
+                return
+            path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export header metrics", "header_metrics.csv", "CSV Files (*.csv)")
+            if not path:
+                return
+            # Use cached last header from last render
+            # we stored header metrics in the header table model
+            hdr_items = []
+            model = self.table_header.model()
+            if isinstance(model, SimpleTableModel):
+                for row in model.rows:
+                    if len(row) >= 2:
+                        hdr_items.append((str(row[0]), row[1]))
+            import csv
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["Key", "Value"])
+                for k, v in hdr_items:
+                    w.writerow([k, v])
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Export error", str(e))
 
     def on_import_si(self) -> None:
         path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open SI report", "", "Text Files (*.txt)")
@@ -283,9 +343,16 @@ class FlowTestTab(QtWidgets.QWidget):
         self._last_rows = rows
         self._last_units = units
         self._last_units_map = data.get("units", {}) or {}
-        # Tables: rows and header
-        table_rows = [[r.get("lift_mm"), r.get("q_in_m3min"), r.get("q_ex_m3min")] for r in rows]
-        model_rows = SimpleTableModel(["Lift [mm]", "Q_in", "Q_ex"], table_rows)
+        # Tables: prefer API-provided normalized table with headers incl. units
+        table = data.get("table") or {}
+        headers = table.get("headers") or ["Lift [mm]", "Q_in", "Q_ex"]
+        table_rows_data = table.get("rows") or rows
+        # if table rows are dicts, map basic columns; else assume already list
+        if table_rows_data and isinstance(table_rows_data[0], dict):
+            table_rows = [[r.get("lift_mm"), r.get("q_in_m3min"), r.get("q_ex_m3min")] for r in table_rows_data]
+        else:
+            table_rows = table_rows_data
+        model_rows = SimpleTableModel(headers, table_rows)
         self.table_rows.setModel(model_rows)
         # Header metrics table (flat key/value for visibility)
         hdr = data.get("header", {}) or {}
