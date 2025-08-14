@@ -268,6 +268,34 @@ def _flowtest_compute_impl(units: Units, header: Dict[str, Any], rows: List[Dict
         header_metrics = A.flowtest_header_metrics_SI(hdr_inputs)
     except Exception:
         header_metrics = {}
+    # Compute L* markers (lift where A_curtain = A_throat) if geometry present
+    markers: Dict[str, Any] = {}
+    try:
+        dvi_m = float(getattr(h, "d_valve_in_mm", 0.0)) / 1000.0
+        dve_m = float(getattr(h, "d_valve_ex_mm", 0.0)) / 1000.0
+        dti_m = float(getattr(h, "d_throat_in_mm", 0.0) or 0.0) / 1000.0
+        dte_m = float(getattr(h, "d_throat_ex_mm", 0.0) or 0.0) / 1000.0
+        dsi_m = float(getattr(h, "d_stem_in_mm", 0.0) or 0.0) / 1000.0
+        dse_m = float(getattr(h, "d_stem_ex_mm", 0.0) or 0.0) / 1000.0
+        if dvi_m > 0 and dti_m > 0:
+            Li_m = F.l_star_curtain_equals_throat(dvi_m, dti_m, dsi_m)
+            markers["Lstar_in_mm"] = Li_m * 1000.0
+            markers["Lstar_in_ld"] = F.ld_axis_tick(F.ld_ratio(Li_m, dvi_m))
+        if dve_m > 0 and dte_m > 0:
+            Le_m = F.l_star_curtain_equals_throat(dve_m, dte_m, dse_m)
+            markers["Lstar_ex_mm"] = Le_m * 1000.0
+            markers["Lstar_ex_ld"] = F.ld_axis_tick(F.ld_ratio(Le_m, dve_m))
+        # Throat % of valve area for quick check
+        if dti_m > 0:
+            a_vi_m2 = (3.141592653589793 * (dvi_m ** 2)) / 4.0
+            a_ti_m2 = F.area_throat(dti_m, dsi_m)
+            header_metrics["throat_pct_in"] = (a_ti_m2 / a_vi_m2) * 100.0 if a_vi_m2 > 0 else None
+        if dte_m > 0:
+            a_ve_m2 = (3.141592653589793 * (dve_m ** 2)) / 4.0
+            a_te_m2 = F.area_throat(dte_m, dse_m)
+            header_metrics["throat_pct_ex"] = (a_te_m2 / a_ve_m2) * 100.0 if a_ve_m2 > 0 else None
+    except Exception:
+        pass
     # Reinforce window cap after metrics
     try:
         if units == "SI" and area_win_in_mm2 and area_win_in_mm2 > 0:
@@ -328,10 +356,12 @@ def _flowtest_compute_impl(units: Units, header: Dict[str, Any], rows: List[Dict
             "swirl_int": swirl_int, "swirl_ex": swirl_ex,
         },
         "units": units_map,
-        "header": header_metrics,
+    "header": header_metrics,
         "rows": rows,  # original shape for callers that expect dicts
         "table": {"headers": headers_tbl, "rows": rows_tbl},
         "area_source": area_source,
+    "markers": markers,
+    "pipe_corrected": bool(getattr(h, "ex_pipe_used", False)),
     }
 
 

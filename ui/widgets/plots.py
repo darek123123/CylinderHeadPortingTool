@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import List, Optional
-from PySide6 import QtCore, QtGui, QtWidgets
+from PySide6 import QtCore, QtGui
 import pyqtgraph as pg
 from pyqtgraph.exporters import ImageExporter
 from ..theme import COLORS
@@ -20,10 +20,10 @@ class Plot(QtCore.QObject):
 
         # State
         self._series: dict[str, pg.PlotDataItem] = {}
-        self._x_unit: str = ""
-        self._y_unit: str = ""
-        self._x_label: str = ""
-        self._y_label: str = ""
+        self._x_unit = ""
+        self._y_unit = ""
+        self._x_label = ""
+        self._y_label = ""
 
         # Crosshair
         self._cross_v = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen(COLORS["grid"]))
@@ -31,15 +31,17 @@ class Plot(QtCore.QObject):
         self.widget.addItem(self._cross_v)
         self.widget.addItem(self._cross_h)
 
-        # XY label overlay
-        self._xy_label = QtWidgets.QLabel("")
-        self._xy_label.setStyleSheet("color: #B0BEC5; background: transparent;")
-        proxy = QtWidgets.QGraphicsProxyWidget()
-        proxy.setWidget(self._xy_label)
-        self.widget.addItem(proxy)
+        # XY label overlay (use pg.TextItem to avoid QGraphics transform warnings)
+        self._xy_text = pg.TextItem("", color=COLORS["neutral"])  # type: ignore[arg-type]
+        self._xy_text.setZValue(1000)  # keep on top
+        self._xy_text.setAnchor((0, 1))  # bottom-left anchor at position
+        self.widget.addItem(self._xy_text, ignoreBounds=True)
 
-        # Mouse move for crosshair
-        self.widget.scene().sigMouseMoved.connect(self._on_mouse_moved)
+        # Mouse move for crosshair (rate-limited)
+        self._mouse_proxy = pg.SignalProxy(self.widget.scene().sigMouseMoved, rateLimit=60, slot=self._on_mouse_moved_evt)
+
+        # Extra markers storage
+        self._markers = []
 
     def add_series(self, name: str, x: List[float], y: List[float], color_token: str, line_width: int = 2, symbol: Optional[str] = None):
         pen = pg.mkPen(COLORS.get(color_token, COLORS["neutral"]), width=line_width)
@@ -58,6 +60,9 @@ class Plot(QtCore.QObject):
         self.legend = self.widget.addLegend()
         self.widget.addItem(self._cross_v)
         self.widget.addItem(self._cross_h)
+        # Re-add XY overlay after clearing the scene
+        self.widget.addItem(self._xy_text, ignoreBounds=True)
+        self._markers.clear()
         # Re-apply axis labels after clear
         if self._x_label or self._x_unit:
             self.widget.setLabel('bottom', self._x_label)
@@ -74,17 +79,33 @@ class Plot(QtCore.QObject):
         self.widget.addItem(line)
         return line
 
+    def add_vertical_marker(self, x: float, color_token: str = "neutral", label: Optional[str] = None):
+        pen = pg.mkPen(COLORS.get(color_token, COLORS["neutral"]))
+        line = pg.InfiniteLine(pos=x, angle=90, movable=False, pen=pen)
+        self.widget.addItem(line)
+        if label:
+            txt = pg.TextItem(label, color=COLORS.get(color_token, COLORS["neutral"]))  # type: ignore[arg-type]
+            txt.setAnchor((0, 1))
+            self.widget.addItem(txt, ignoreBounds=True)
+            vb = self.widget.getViewBox()
+            if vb is not None:
+                try:
+                    y_range = vb.viewRange()[1]
+                    txt.setPos(x, y_range[1])
+                except Exception:
+                    pass
+        self._markers.append(line)
+        return line
+
     def set_units(self, x_unit: str = "", y_unit: str = ""):
         self._x_unit = x_unit
         self._y_unit = y_unit
-        # Update existing labels to include units
         if self._x_label:
             self.widget.setLabel('bottom', self._x_label)
         if self._y_label:
             self.widget.setLabel('left', self._y_label)
 
     def set_axis_labels(self, x_label: str = "", y_label: str = ""):
-        """Set human-readable axis labels including units. Caller formats units in labels."""
         self._x_label = x_label
         self._y_label = y_label
         if x_label:
@@ -105,6 +126,8 @@ class Plot(QtCore.QObject):
     # Internal helpers
     def _on_mouse_moved(self, pos):
         vb = self.widget.plotItem.vb
+        if vb is None or pos is None:
+            return
         mousePoint = vb.mapSceneToView(pos)
         x = mousePoint.x()
         y = mousePoint.y()
@@ -112,10 +135,14 @@ class Plot(QtCore.QObject):
         self._cross_h.setPos(y)
         xu = f" {self._x_unit}" if self._x_unit else ""
         yu = f" {self._y_unit}" if self._y_unit else ""
-        self._xy_label.setText(f"x={x:.3f}{xu}, y={y:.3f}{yu}")
+        self._xy_text.setText(f"x={x:.3f}{xu}, y={y:.3f}{yu}")
+        self._xy_text.setPos(x, y)
+
+    def _on_mouse_moved_evt(self, args):
+        pos = args[0] if isinstance(args, (list, tuple)) and args else args
+        self._on_mouse_moved(pos)
 
     def _attach_legend_interaction(self):
-        # Install mouse press/double press events on legend items
         for sample, label in getattr(self.legend, 'items', []):
             item_name = getattr(label, 'text', None)
             if not item_name or not hasattr(label, 'mousePressEvent'):

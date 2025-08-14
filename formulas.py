@@ -965,6 +965,16 @@ def area_curtain(d_valve: float, lift: float) -> float:
     return math.pi * d_valve * lift
 
 
+def l_star_curtain_equals_throat(d_valve_m: float, d_throat_m: float, d_stem_m: float) -> float:
+    """Lift L* [m] where A_curtain = A_throat (ignoring seat limits):
+    π*d_v*L = π/4*(d_t^2 − d_s^2) -> L = (d_t^2 − d_s^2) / (4*d_v).
+    All inputs in meters; returns meters. Raises on invalid geometry.
+    """
+    if d_valve_m <= 0 or d_throat_m <= 0 or d_stem_m < 0 or d_stem_m >= d_throat_m:
+        raise ValueError("Invalid geometry for L* computation")
+    return (d_throat_m * d_throat_m - d_stem_m * d_stem_m) / (4.0 * d_valve_m)
+
+
 def ld_ratio(lift: float, d_valve: float) -> float:
     if d_valve <= 0:
         raise ValueError("d_valve>0.")

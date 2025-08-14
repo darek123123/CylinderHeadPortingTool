@@ -83,6 +83,10 @@ class FlowTestTab(QtWidgets.QWidget):
         right_layout = QtWidgets.QVBoxLayout(right_panel)
         self.plot = Plot()
         right_layout.addWidget(self.plot.widget)
+        # Small status row for source/tooltips
+        self.lbl_info = QtWidgets.QLabel("")
+        self.lbl_info.setStyleSheet("color: #aaa; font-size: 11px;")
+        right_layout.addWidget(self.lbl_info)
         controls = QtWidgets.QHBoxLayout()
         self.axis = QtWidgets.QComboBox()
         self.axis.addItems(["lift", "ld"])  # x-axis
@@ -127,6 +131,7 @@ class FlowTestTab(QtWidgets.QWidget):
         self._last_rows = []
         self._last_units = "SI"
         self._last_units_map = {}
+        self._last_markers = {}
 
     def on_sample_menu(self) -> None:
         menu = QtWidgets.QMenu(self)
@@ -343,6 +348,16 @@ class FlowTestTab(QtWidgets.QWidget):
         self._last_rows = rows
         self._last_units = units
         self._last_units_map = data.get("units", {}) or {}
+        self._last_markers = data.get("markers", {}) or {}
+        # Info label: area source and pipe correction
+        area_src = data.get("area_source")
+        pipe = data.get("pipe_corrected", False)
+        info_bits = []
+        if area_src:
+            info_bits.append(f"area: {area_src}")
+        if pipe:
+            info_bits.append("exhaust pipe corrected")
+        self.lbl_info.setText("  • ".join(info_bits))
         # Tables: prefer API-provided normalized table with headers incl. units
         table = data.get("table") or {}
         headers = table.get("headers") or ["Lift [mm]", "Q_in", "Q_ex"]
@@ -377,11 +392,25 @@ class FlowTestTab(QtWidgets.QWidget):
             x_int = x_ex = self._last_x.get("lift_mm", [])
             self.plot.set_units("mm", self._y_unit_for_metric())
             self.plot.set_axis_labels("Lift [mm]", f"{self._y_unit_for_metric()}")
+            # L* markers in mm if available
+            Li = self._last_markers.get("Lstar_in_mm")
+            Le = self._last_markers.get("Lstar_ex_mm")
+            if Li:
+                self.plot.add_vertical_marker(Li, "intake", "L* IN")
+            if Le:
+                self.plot.add_vertical_marker(Le, "exhaust", "L* EX")
         else:
             x_int = self._last_x.get("ld_int", [])
             x_ex = self._last_x.get("ld_ex", [])
             self.plot.set_units("L/D", self._y_unit_for_metric())
             self.plot.set_axis_labels("L/D [-]", f"{self._y_unit_for_metric()}")
+            # L* markers in L/D if available
+            Li = self._last_markers.get("Lstar_in_ld")
+            Le = self._last_markers.get("Lstar_ex_ld")
+            if Li:
+                self.plot.add_vertical_marker(Li, "intake", "L* IN")
+            if Le:
+                self.plot.add_vertical_marker(Le, "exhaust", "L* EX")
         # Metric mapping to series keys
         metric_name = self.metric.currentText()
         key_map = {
