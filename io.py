@@ -141,6 +141,7 @@ def parse_iop_report_us(text: str) -> Dict[str, Any]:
         "n_ports_eff": kv_main.get("portseff", kv_main.get("n_ports_eff", 2.0)),
         "cr": kv_main.get("cr", 10.5),
     }
+    # Build flow header with geometry in mm (tests/analysis assume SI geometry)
     flow_header: Dict[str, Any] = {
         "in_width_mm": kv_flow.get("inlet_width_mm", 0.0),
         "in_height_mm": kv_flow.get("inlet_height_mm", 0.0),
@@ -157,6 +158,25 @@ def parse_iop_report_us(text: str) -> Dict[str, Any]:
         "rows_in": [],
         "rows_ex": [],
     }
+    # Optional geometry if present in some US fixtures (carry through for effective area/L* calculations)
+    # Accept a few common key spellings
+    def _opt(name: str, *alts: str):
+        for k in (name, *alts):
+            if k in kv_flow:
+                return kv_flow[k]
+        return None
+    flow_header["d_stem_in_mm"] = _opt("d_stem_in_mm", "stem_in_mm")
+    flow_header["d_stem_ex_mm"] = _opt("d_stem_ex_mm", "stem_ex_mm")
+    flow_header["d_throat_in_mm"] = _opt("d_throat_in_mm", "throat_in_mm")
+    flow_header["d_throat_ex_mm"] = _opt("d_throat_ex_mm", "throat_ex_mm")
+    flow_header["seat_angle_in_deg"] = _opt("seat_angle_in_deg", "seat_in_deg")
+    flow_header["seat_angle_ex_deg"] = _opt("seat_angle_ex_deg", "seat_ex_deg")
+    flow_header["seat_width_in_mm"] = _opt("seat_width_in_mm", "seat_w_in_mm")
+    flow_header["seat_width_ex_mm"] = _opt("seat_width_ex_mm", "seat_w_ex_mm")
+    # Optional exhaust pipe flag
+    ex_pipe = kv_main.get("ex_pipe_used", kv_flow.get("ex_pipe_used", kv_flow.get("exhaust_pipe_used", None)))
+    if ex_pipe is not None:
+        flow_header["ex_pipe_used"] = bool(ex_pipe)
     rows: List[Dict[str, Any]] = []
     for ln in rows_block:
         if not ln or ln.startswith("#"):
@@ -178,6 +198,7 @@ def parse_iop_report_us(text: str) -> Dict[str, Any]:
         if len(parts) >= 6 and parts[5]:
             row["a_eff_in2"] = _norm_number(parts[5])
         rows.append(row)
-    flow_header["rows_in"].append({"m3min_corr": q_in_cfm * 0.028316846592, "dp_inH2O": dp_inH2O})
-    flow_header["rows_ex"].append({"m3min_corr": q_ex_cfm * 0.028316846592, "dp_inH2O": dp_inH2O})
+        # Accumulate per-row header flows (convert CFM->m3/min) preserving dp for floating depression
+        flow_header["rows_in"].append({"m3min_corr": q_in_cfm * 0.028316846592, "dp_inH2O": dp_inH2O})
+        flow_header["rows_ex"].append({"m3min_corr": q_ex_cfm * 0.028316846592, "dp_inH2O": dp_inH2O})
     return {"main": main, "flow_header": flow_header, "flow_rows": rows}
