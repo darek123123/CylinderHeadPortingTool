@@ -178,6 +178,6 @@ def parse_iop_report_us(text: str) -> Dict[str, Any]:
         if len(parts) >= 6 and parts[5]:
             row["a_eff_in2"] = _norm_number(parts[5])
         rows.append(row)
-        flow_header["rows_in"].append({"m3min_corr": q_in_cfm * 0.028316846592})
-        flow_header["rows_ex"].append({"m3min_corr": q_ex_cfm * 0.028316846592})
+    flow_header["rows_in"].append({"m3min_corr": q_in_cfm * 0.028316846592, "dp_inH2O": dp_inH2O})
+    flow_header["rows_ex"].append({"m3min_corr": q_ex_cfm * 0.028316846592, "dp_inH2O": dp_inH2O})
     return {"main": main, "flow_header": flow_header, "flow_rows": rows}

@@ -98,9 +98,15 @@ def _flowtest_compute_impl(units: Units, header: Dict[str, Any], rows: List[Dict
         rows_v = [FlowRowSI(**r).model_dump() for r in rows]
     else:
         if not header_prefill.get("rows_in"):
-            header_prefill["rows_in"] = [{"m3min_corr": F.cfm_to_m3min(float(r.get("q_cfm", r.get("q_in_cfm", 0.0))))} for r in rows]
+            header_prefill["rows_in"] = [{
+                "m3min_corr": F.cfm_to_m3min(float(r.get("q_cfm", r.get("q_in_cfm", 0.0)))),
+                "dp_inH2O": float(r.get("dp_inH2O", 28.0)),
+            } for r in rows]
         if not header_prefill.get("rows_ex"):
-            header_prefill["rows_ex"] = [{"m3min_corr": F.cfm_to_m3min(float(r.get("q_ex_cfm", r.get("q_cfm", 0.0))))} for r in rows]
+            header_prefill["rows_ex"] = [{
+                "m3min_corr": F.cfm_to_m3min(float(r.get("q_ex_cfm", r.get("q_cfm", 0.0)))),
+                "dp_inH2O": float(r.get("dp_inH2O", 28.0)),
+            } for r in rows]
         h = FlowHeaderInputsUS(**header_prefill)
         rows_v = [FlowRowUS(**r).model_dump() for r in rows]
 
@@ -306,34 +312,59 @@ def _flowtest_compute_impl(units: Units, header: Dict[str, Any], rows: List[Dict
     # Normalized table
     if units == "SI":
         rows_tbl = []
+        corr_factors = []
         for i, r in enumerate(rows):
             lift = _f(r.get("lift_mm"), 0.0)
             qi = _f(r.get("q_in_m3min", 0.0), 0.0)
             qe = _f(r.get("q_ex_m3min", 0.0), 0.0)
+            dp = _f(r.get("dp_inH2O", r.get("dp_Pa", None) and F.pa_to_in_h2o(r.get("dp_Pa")) or 28.0), 28.0)
             a_mean = _f(r.get("a_mean_mm2"), area_win_in_mm2 or 0.0)
             a_eff = _f((_compute_a_eff_mm2("in", lift) or r.get("a_eff_mm2") or 0.0), 0.0)
-            rows_tbl.append([lift, qi, qe, a_mean, a_eff])
+            # Per-row correction factor to 28" (4 decimals)
+            try:
+                meas = F.AirState(101325.0, F.C_to_K(20.0), 0.0)
+                ref = meas
+                f28 = F.flow_to_28inH2O(1.0, dp, meas, ref)
+                factor = round(float(f28), 4)
+            except Exception:
+                factor = None
+            corr_factors.append(factor)
+            rows_tbl.append([lift, qi, qe, dp, a_mean, factor, a_eff])
         headers_tbl = [
             "Lift [mm]",
             f"Q_in [{units_map['flow']}]",
             f"Q_ex [{units_map['flow']}]",
+            "ΔP [inH2O]",
             "A_mean [mm²]",
+            "Corr→28\" · A_eff",
             "A_eff [mm²]",
         ]
     else:
         rows_tbl = []
+        corr_factors = []
         for r in rows_v:
             lift = float(r.get("lift_in"))
             qi = float(r.get("q_cfm", 0.0))
             qe = float(r.get("q_ex_cfm", r.get("q_cfm", 0.0)))
+            dp = float(r.get("dp_inH2O", 28.0))
             a_mean = float(r.get("a_mean_in2", 0.0) or 0.0)
             a_eff = float(r.get("a_eff_in2", 0.0) or 0.0)
-            rows_tbl.append([lift, qi, qe, a_mean, a_eff])
+            try:
+                meas = F.AirState(101325.0, F.C_to_K(20.0), 0.0)
+                ref = meas
+                f28 = F.flow_to_28inH2O(1.0, dp, meas, ref)
+                factor = round(float(f28), 4)
+            except Exception:
+                factor = None
+            corr_factors.append(factor)
+            rows_tbl.append([lift, qi, qe, dp, a_mean, factor, a_eff])
         headers_tbl = [
             "Lift [in]",
             f"Q_in [{units_map['flow']}]",
             f"Q_ex [{units_map['flow']}]",
+            "ΔP [inH2O]",
             "A_mean [in²]",
+            "Corr→28\" · A_eff",
             "A_eff [in²]",
         ]
 
@@ -374,6 +405,7 @@ def _flowtest_compute_impl(units: Units, header: Dict[str, Any], rows: List[Dict
     "pipe_corrected": bool(getattr(h, "ex_pipe_used", False)),
     "floating_depression": bool(floating_depression),
     "sae_cd_basis": "curtain",  # explicit contract: SAE Cd uses curtain-only reference
+    "corrections": {"factor_to_28_per_row": corr_factors},
     }
 
 
