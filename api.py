@@ -342,6 +342,16 @@ def _flowtest_compute_impl(units: Units, header: Dict[str, Any], rows: List[Dict
     area_src_ex = _determine_area_source(rows[0] if rows else {}, dict(h))
     area_source = area_src_in if area_src_in == area_src_ex else (area_src_in or area_src_ex or "mixed")
 
+    # Detect floating depression usage (per-row dp provided)
+    floating_depression = False
+    try:
+        if units == "SI":
+            floating_depression = any("dp_inH2O" in r or "dp_Pa" in r for r in rows)
+        else:
+            floating_depression = any("dp_inH2O" in r or "dp_Pa" in r for r in rows_v)
+    except Exception:
+        floating_depression = False
+
     return {
         "x": {"lift_mm": x_lift, "ld_int": x_ld_int, "ld_ex": x_ld_ex},
         "series": {
@@ -355,13 +365,15 @@ def _flowtest_compute_impl(units: Units, header: Dict[str, Any], rows: List[Dict
             "observed_per_area_int": observed_int, "observed_per_area_ex": observed_ex,
             "swirl_int": swirl_int, "swirl_ex": swirl_ex,
         },
-        "units": units_map,
+    "units": units_map,
     "header": header_metrics,
         "rows": rows,  # original shape for callers that expect dicts
         "table": {"headers": headers_tbl, "rows": rows_tbl},
         "area_source": area_source,
     "markers": markers,
     "pipe_corrected": bool(getattr(h, "ex_pipe_used", False)),
+    "floating_depression": bool(floating_depression),
+    "sae_cd_basis": "curtain",  # explicit contract: SAE Cd uses curtain-only reference
     }
 
 

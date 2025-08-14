@@ -194,30 +194,30 @@ def series_cfm_per_sq_area(points: List[Dict], units: Literal["US","SI"]) -> Lis
 
 
 def series_sae_cd(points: List[Dict], units: Literal["US", "SI"] = "US") -> List[float]:
-    def _a_ref_to_m2(pt: Dict) -> float:
-        # Accept any of the following keys and normalize to m^2
-        if "a_ref_m2" in pt and pt["a_ref_m2"] is not None:
-            return float(pt["a_ref_m2"])
-        if "a_ref_mm2" in pt and pt["a_ref_mm2"] is not None:
-            return float(pt["a_ref_mm2"]) * 1e-6
-        if "a_ref_in2" in pt and pt["a_ref_in2"] is not None:
-            # in^2 → m^2 (via mm^2 then to m^2 for consistency with existing helpers)
-            return F.in2_to_mm2(float(pt["a_ref_in2"])) * 1e-6
-        raise KeyError("Missing a_ref (expected one of: a_ref_m2, a_ref_mm2, a_ref_in2)")
+    """SAE Cd based on curtain area only (A_ref = π d_v · lift), per IOP spec.
 
+    Ignores any provided a_ref fields and derives the reference from valve diameter and lift.
+    Requires keys: (US) q_cfm, lift_in, d_valve_in, dp_inH2O (or dp_Pa);
+                   (SI) q_m3min, lift_mm, d_valve_mm, dp_Pa (or dp_inH2O).
+    """
     cds: List[float] = []
     for p in points:
-        # Flow to m^3/s
+        # Flow to m^3/s and pressure to Pa
         if units == "US":
             q_m3s = F.cfm_to_m3s(p["q_cfm"]) if "q_cfm" in p else (p.get("q_m3min", 0.0) / 60.0)
-            dp_Pa = F.in_h2o_to_pa(p["dp_inH2O"]) if "dp_inH2O" in p else p.get("dp_Pa", F.in_h2o_to_pa(28.0))
+            dp_Pa = F.in_h2o_to_pa(p.get("dp_inH2O", 28.0)) if "dp_inH2O" in p or "dp_Pa" not in p else float(p["dp_Pa"])
+            # Curtain area from inches → meters
+            d_m = F.in_to_mm(p.get("d_valve_in", 0.0)) / 1000.0
+            l_m = F.in_to_mm(p.get("lift_in", 0.0)) / 1000.0
         else:
             q_m3s = (p["q_m3min"] / 60.0) if "q_m3min" in p else F.cfm_to_m3s(p.get("q_cfm", 0.0))
-            # Accept dp in Pa or inH2O for SI too
-            dp_Pa = p.get("dp_Pa", F.in_h2o_to_pa(p.get("dp_inH2O", 28.0)))
-        a_ref = _a_ref_to_m2(p)
-        rho = p.get("rho_kgm3", 1.225)
-        cds.append(F.cd(q_m3s, a_ref, dp_Pa, float(rho)))
+            dp_Pa = float(p.get("dp_Pa", F.in_h2o_to_pa(p.get("dp_inH2O", 28.0))))
+            # Curtain area from millimeters → meters
+            d_m = float(p.get("d_valve_mm", 0.0)) / 1000.0
+            l_m = float(p.get("lift_mm", 0.0)) / 1000.0
+        a_ref = F.area_curtain(d_m, l_m)
+        rho = float(p.get("rho_kgm3", 1.225))
+        cds.append(F.cd(q_m3s, a_ref, dp_Pa, rho))
     return cds
 
 
