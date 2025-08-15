@@ -166,6 +166,32 @@ def _flowtest_compute_impl(units: Units, header: Dict[str, Any], rows: List[Dict
         # derive valve diameters in inches from header (required for LD and observed per area)
         dvi_in = F.mm_to_in(float(getattr(h, "d_valve_in_mm", 0.0) or 0.0))
         dve_in = F.mm_to_in(float(getattr(h, "d_valve_ex_mm", 0.0) or 0.0))
+        # Helper to compute A_eff [in^2] from SI geometry for a given lift_in [in]
+        def _compute_a_eff_in2(side: str, lift_in: float) -> Optional[float]:
+            try:
+                # Pull SI geometry from header
+                dv_mm = float(getattr(h, "d_valve_in_mm" if side == "in" else "d_valve_ex_mm", 0.0) or 0.0)
+                dt_mm = float(getattr(h, "d_throat_in_mm" if side == "in" else "d_throat_ex_mm", 0.0) or 0.0)
+                ds_mm = float(getattr(h, "d_stem_in_mm" if side == "in" else "d_stem_ex_mm", 0.0) or 0.0)
+                sa_deg = float(getattr(h, "seat_angle_in_deg" if side == "in" else "seat_angle_ex_deg", 45.0) or 45.0)
+                sw_mm = float(getattr(h, "seat_width_in_mm" if side == "in" else "seat_width_ex_mm", 0.0) or 0.0)
+                # Window cap from computed window area
+                cap_mm2 = (area_win_in_mm2 if side == "in" else area_win_ex_mm2) or 0.0
+                # Convert to meters and compute
+                dv = dv_mm / 1000.0
+                dt = dt_mm / 1000.0 if dt_mm > 0 else None
+                ds = ds_mm / 1000.0
+                sw = sw_mm / 1000.0
+                lift_m = F.in_to_mm(lift_in) / 1000.0
+                cap_m2 = (cap_mm2 * 1e-6) if cap_mm2 and cap_mm2 > 0 else None
+                if dt is None:
+                    a_curt_m2 = F.area_curtain(dv, lift_m)
+                    a_m2 = min(a_curt_m2, cap_m2) if cap_m2 else a_curt_m2
+                else:
+                    a_m2 = F.effective_area_with_seat(lift_m, dv, dt, ds, sa_deg, sw, window_area_m2=cap_m2)
+                return F.mm2_to_in2(a_m2 * 1e6)
+            except Exception:
+                return None
         for r in rows_v:
             p_in: Dict[str, Any] = {
                 "lift_in": float(r["lift_in"]),
@@ -173,16 +199,32 @@ def _flowtest_compute_impl(units: Units, header: Dict[str, Any], rows: List[Dict
                 "dp_inH2O": float(r.get("dp_inH2O", 28.0)),
                 "d_valve_in": float(r.get("d_valve_in", dvi_in) or dvi_in),
             }
-            if r.get("a_mean_in2") is not None:
-                p_in["a_mean_in2"] = float(r["a_mean_in2"])
-                p_in["a_ref_in2"] = float(r["a_mean_in2"])  # Cd reference
-            if r.get("a_eff_in2") is not None:
-                p_in["a_eff_in2"] = float(r["a_eff_in2"])  # effective velocity/CD
+            # Mean area: prefer provided; else use window area from header if available
+            a_mean_in2 = r.get("a_mean_in2")
+            if a_mean_in2 is None and area_win_in_mm2 and area_win_in_mm2 > 0:
+                a_mean_in2 = F.mm2_to_in2(area_win_in_mm2)
+            if a_mean_in2 is not None:
+                p_in["a_mean_in2"] = float(a_mean_in2)
+                p_in["a_ref_in2"] = float(a_mean_in2)  # Cd reference (not used for SAE Cd but useful for tables)
+            # Effective area: prefer provided; else compute from geometry
+            a_eff_in2 = r.get("a_eff_in2")
+            if a_eff_in2 is None:
+                a_eff_in2 = _compute_a_eff_in2("in", float(r["lift_in"]))
+            if a_eff_in2 is not None:
+                p_in["a_eff_in2"] = float(a_eff_in2)
             p_ex = dict(p_in)
             if r.get("q_ex_cfm") is not None:
                 p_ex["q_cfm"] = float(r["q_ex_cfm"])
             # Use exhaust valve diameter for exhaust side if available
             p_ex["d_valve_in"] = float(r.get("d_valve_in", dve_in) or dve_in)
+            # Compute exhaust-side effective area if missing
+            if "a_eff_in2" not in p_ex:
+                a_eff_ex = _compute_a_eff_in2("ex", float(r["lift_in"]))
+                if a_eff_ex is not None:
+                    p_ex["a_eff_in2"] = float(a_eff_ex)
+            # Provide exhaust mean area if missing and window available
+            if "a_mean_in2" not in p_ex and area_win_ex_mm2 and area_win_ex_mm2 > 0:
+                p_ex["a_mean_in2"] = F.mm2_to_in2(area_win_ex_mm2)
             pts_int.append(p_in)
             pts_ex.append(p_ex)
     else:

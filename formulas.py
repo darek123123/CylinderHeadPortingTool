@@ -82,12 +82,15 @@ def cc_to_in3(v_cc: float) -> float:
 def air_state_gui(units: Literal["US", "SI"]) -> Tuple[float, float, float]:
     """
     Return GUI constants tuple (a0, rho, g) for the given units.
+    Values are read dynamically from calibration to allow test-time overrides.
     - US: a0=1125 ft/s, rho=0.0023769 slug/ft^3, g=32.174 ft/s^2
-    - SI: a0=343.2 m/s,  rho=1.225 kg/m^3,       g=9.80665 m/s^2
+    - SI: a0=343.2 m/s,  rho=1.225 kg/m^3 (default), g=9.80665 m/s^2
     """
+    # Read from calibration at call time so tests/tools can tweak without re-importing
+    from . import calibration as CAL
     if units.upper() == "US":
-        return (A0_FT_S, RHO_SLUG_FT3, G_FTPS2)
-    return (A0_M_S, RHO_KGM3_STD, G_M_S2)
+        return (CAL.A0_FT_S, CAL.RHO_SLUG_FT3, CAL.G_FTPS2)
+    return (CAL.A0_M_S, CAL.RHO_KGM3_STD, CAL.G_M_S2)
 def port_velocity(q_cfm: float, mean_area_in2: float) -> float:
     """
     Mean port velocity [ft/s]:

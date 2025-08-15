@@ -72,3 +72,14 @@ AIR_P_kPa: float = 101.325
 
 # Required ratio strategy (placeholder for future piecewise/CR-Lmax models)
 REQUIRED_RATIO_STRATEGY: str = "linear"
+
+# --- Helper: allow tests/tools to override standard SI density (e.g., DV 70°F ~ 1.204 kg/m^3) ---
+def set_standard_si_density(rho_kgm3: float) -> None:
+	"""Override the standard SI air density used by GUI helpers. Safe for tests.
+	Pass a positive value, e.g., 1.204 for ~70°F. This only affects helpers reading
+	calibration at call time.
+	"""
+	global RHO_KGM3_STD
+	if rho_kgm3 <= 0:
+		raise ValueError("rho_kgm3 must be > 0")
+	RHO_KGM3_STD = float(rho_kgm3)
